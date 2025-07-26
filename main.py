@@ -1,47 +1,52 @@
 import os
-import json
-import hmac
-import hashlib
 import time
+import hmac
+import json
+import hashlib
 import requests
-import redis
 from flask import Flask, request, jsonify
+from dotenv import load_dotenv
 
+load_dotenv()
 app = Flask(__name__)
-r = redis.from_url(os.getenv("REDIS_URL"))
+
+BITVAVO_API_KEY = os.getenv("BITVAVO_API_KEY")
+BITVAVO_API_SECRET = os.getenv("BITVAVO_API_SECRET")
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 CHAT_ID = os.getenv("CHAT_ID")
-API_KEY = os.getenv("BITVAVO_API_KEY")
-API_SECRET = os.getenv("BITVAVO_API_SECRET")
 BUY_AMOUNT_EUR = float(os.getenv("BUY_AMOUNT_EUR", 10))
 
+# إرسال رسالة تيليغرام
 def send_message(text):
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
     data = {"chat_id": CHAT_ID, "text": text}
     try:
         requests.post(url, data=data)
     except Exception as e:
-        print("Telegram Error:", e)
+        print("فشل إرسال الرسالة:", e)
 
+# توقيع الطلبات لبيتفافو
 def create_signature(timestamp, method, path, body):
-    body_str = json.dumps(body, separators=(',', ':')) if body else ''
+    body_str = json.dumps(body, separators=(',', ':')) if body else ""
     msg = f"{timestamp}{method}{path}{body_str}"
-    return hmac.new(API_SECRET.encode(), msg.encode(), hashlib.sha256).hexdigest()
+    return hmac.new(BITVAVO_API_SECRET.encode(), msg.encode(), hashlib.sha256).hexdigest()
 
+# تنفيذ طلب لبيتفافو
 def bitvavo_request(method, path, body=None):
+    url = "https://api.bitvavo.com/v2" + path
     timestamp = str(int(time.time() * 1000))
     signature = create_signature(timestamp, method, path, body)
     headers = {
-        'Bitvavo-Access-Key': API_KEY,
-        'Bitvavo-Access-Signature': signature,
-        'Bitvavo-Access-Timestamp': timestamp,
-        'Bitvavo-Access-Window': '10000',
-        'Content-Type': 'application/json'
+        "Bitvavo-Access-Key": BITVAVO_API_KEY,
+        "Bitvavo-Access-Signature": signature,
+        "Bitvavo-Access-Timestamp": timestamp,
+        "Bitvavo-Access-Window": "10000",
+        "Content-Type": "application/json"
     }
-    url = f"https://api.bitvavo.com/v2{path}"
-    response = requests.request(method, url, headers=headers, json=body)
-    return response.json()
+    resp = requests.request(method, url, headers=headers, json=body)
+    return resp.json()
 
+# شراء عملة
 def buy(symbol):
     try:
         order = {
@@ -52,22 +57,31 @@ def buy(symbol):
             "amountQuote": True
         }
         result = bitvavo_request("POST", "/order", order)
-        send_message(f"🚀 تم شراء {symbol} بقيمة {BUY_AMOUNT_EUR} يورو!")
-        return result
+        print("BUY RESPONSE:", result)
+        if "orderId" in result:
+            send_message(f"🚀 تم شراء {symbol.upper()} بقيمة {BUY_AMOUNT_EUR} يورو!")
+        else:
+            send_message(f"❌ فشل الشراء: {result}")
     except Exception as e:
         send_message(f"❌ فشل الشراء: {str(e)}")
 
+# بيع كامل الرصيد
 def sell(symbol):
     try:
         balance = bitvavo_request("GET", "/balance")
-        amount = None
-        for item in balance:
-            if item['symbol'] == symbol:
-                amount = item['available']
-                break
-        if not amount or float(amount) == 0:
-            send_message(f"❌ لا يوجد رصيد كافٍ من {symbol} للبيع")
+        if isinstance(balance, list):
+            amount = None
+            for item in balance:
+                if item.get("symbol") == symbol:
+                    amount = item.get("available")
+                    break
+            if not amount or float(amount) == 0:
+                send_message(f"❌ لا يوجد رصيد كافٍ من {symbol} للبيع")
+                return
+        else:
+            send_message(f"❌ فشل جلب الرصيد: {balance}")
             return
+
         order = {
             "market": f"{symbol}-EUR",
             "side": "sell",
@@ -75,12 +89,16 @@ def sell(symbol):
             "amount": amount
         }
         result = bitvavo_request("POST", "/order", order)
-        send_message(f"📤 تم بيع كل رصيد {symbol}!")
-        return result
+        print("SELL RESPONSE:", result)
+        if "orderId" in result:
+            send_message(f"📤 تم بيع كل رصيد {symbol.upper()}!")
+        else:
+            send_message(f"❌ فشل البيع: {result}")
     except Exception as e:
         send_message(f"❌ فشل البيع: {str(e)}")
 
-@app.route("/", methods=["POST"])
+# استقبال أوامر تيليغرام
+@app.route('/', methods=['POST'])
 def webhook():
     data = request.json
     message = data.get("message", {})
@@ -101,5 +119,5 @@ def webhook():
 
     return jsonify({"ok": True})
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     app.run(host="0.0.0.0", port=8080)
