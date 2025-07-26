@@ -1,78 +1,106 @@
 import os
 import json
-import time
 import redis
 import requests
 from flask import Flask, request
 from bitvavo_client.bitvavo import Bitvavo
 
-# إعداد التطبيق و Redis
 app = Flask(__name__)
 r = redis.from_url(os.getenv("REDIS_URL"))
 
-# إعداد المفاتيح الخاصة بالنمس
+BOT_TOKEN = os.getenv("BOT_TOKEN")
+CHAT_ID = os.getenv("CHAT_ID")
+BUY_AMOUNT_EUR = float(os.getenv("BUY_AMOUNT_EUR", 10))
+BITVAVO_API_KEY = os.getenv("BITVAVO_API_KEY")
+BITVAVO_API_SECRET = os.getenv("BITVAVO_API_SECRET")
+
 bitvavo = Bitvavo({
-    'APIKEY': os.getenv("SCALPER_API_KEY"),
-    'APISECRET': os.getenv("SCALPER_API_SECRET"),
+    'APIKEY': BITVAVO_API_KEY,
+    'APISECRET': BITVAVO_API_SECRET,
     'RESTURL': 'https://api.bitvavo.com/v2',
     'WSURL': 'wss://ws.bitvavo.com/v2/'
 })
 
-BOT_TOKEN = os.getenv("BOT_TOKEN")
-CHAT_ID = os.getenv("CHAT_ID")
-BUY_AMOUNT_EUR = 10  # شراء دائمًا بـ 10 يورو
+SYMBOL = "ADA-EUR"  # يمكن تغييره لاحقاً
+POSITION_KEY = "nems_position"
 
 def send_message(text):
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
     data = {"chat_id": CHAT_ID, "text": text}
     try:
         requests.post(url, data=data)
-    except Exception as e:
-        print("فشل إرسال الرسالة:", e)
+    except:
+        pass
 
-@app.route("/", methods=["POST"])
+@app.route('/', methods=['POST'])
 def webhook():
     data = request.json
     text = data.get("message", {}).get("text", "").strip()
-    chat_id = data.get("message", {}).get("chat", {}).get("id")
 
-    if text == "اشتري يا نمس":
-        try:
-            # شراء 10 يورو من BTC كمثال
-            response = bitvavo.placeOrder("BTC-EUR", {
-                "side": "buy",
-                "orderType": "market",
-                "amount": str(BUY_AMOUNT_EUR / get_price("BTC-EUR"))
-            })
-            send_message("✅ تم الشراء يا نمس")
-        except Exception as e:
-            send_message(f"❌ فشل الشراء: {e}")
+    if "اشتري يا نمس" in text:
+        return buy()
 
-    elif text == "بيع يا نمس":
-        try:
-            balance = bitvavo.balance("BTC")
-            amount = float(balance.get("available", 0))
-            if amount > 0:
-                bitvavo.placeOrder("BTC-EUR", {
-                    "side": "sell",
-                    "orderType": "market",
-                    "amount": str(amount)
-                })
-                send_message("✅ تم البيع يا نمس")
-            else:
-                send_message("🚫 لا يوجد BTC للبيع")
-        except Exception as e:
-            send_message(f"❌ فشل البيع: {e}")
+    elif "بيع يا نمس" in text:
+        return sell()
 
-    return "", 200
+    return "ok"
 
-def get_price(symbol):
+def buy():
+    if r.get(POSITION_KEY):
+        send_message("🚫 في صفقة مفتوحة حالياً.")
+        return "already open", 200
+
     try:
-        ticker = bitvavo.tickerPrice(symbol)
-        return float(ticker["price"])
-    except:
-        return 0
+        price = float(bitvavo.tickerPrice({ 'market': SYMBOL })['price'])
+        quantity = round(BUY_AMOUNT_EUR / price, 2)
 
-# لتشغيل Flask على Railway
-if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=int(os.getenv("PORT", 5000)))
+        response = bitvavo.placeOrder(SYMBOL, {
+            'side': 'buy',
+            'orderType': 'market',
+            'amount': str(quantity)
+        })
+
+        r.set(POSITION_KEY, json.dumps({
+            "symbol": SYMBOL,
+            "buy_price": price
+        }))
+
+        send_message(f"✅ اشترى النمس {SYMBOL.split('-')[0]} بسعر {price:.4f}")
+        return "bought", 200
+
+    except Exception as e:
+        send_message(f"❌ فشل الشراء: {e}")
+        return "error", 500
+
+def sell():
+    position = r.get(POSITION_KEY)
+    if not position:
+        send_message("🚫 لا يوجد صفقة مفتوحة حالياً.")
+        return "no open trade", 200
+
+    try:
+        position = json.loads(position)
+        symbol = position["symbol"]
+
+        balance = bitvavo.balance(symbol.split("-")[0])
+        quantity = float(balance[0].get("available", 0))
+        if quantity == 0:
+            send_message("🚫 لا يوجد رصيد للبيع.")
+            return "no balance", 200
+
+        response = bitvavo.placeOrder(symbol, {
+            'side': 'sell',
+            'orderType': 'market',
+            'amount': str(quantity)
+        })
+
+        r.delete(POSITION_KEY)
+        send_message(f"✅ باع النمس {symbol.split('-')[0]} بنجاح.")
+        return "sold", 200
+
+    except Exception as e:
+        send_message(f"❌ فشل البيع: {e}")
+        return "error", 500
+
+if __name__ == '__main__':
+    app.run(host="0.0.0.0", port=8080)
