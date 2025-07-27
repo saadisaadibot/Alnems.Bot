@@ -144,17 +144,27 @@ def watch_sell(symbol, buy_price):
 # ✅ جلب Top 30 عملة حسب حجم التداول
 def get_top_30():
     try:
+        print("🔁 جلب البيانات من Bitvavo...")
         tickers = BITVAVO.ticker24h({})
         if isinstance(tickers, str):
             tickers = json.loads(tickers)
 
         filtered = []
         for t in tickers:
-            if t.get("market", "").endswith("-EUR") and "volume" in t:
+            market = t.get("market", "")
+            volume = t.get("volume")
+            if (
+                market.endswith("-EUR")
+                and volume is not None
+                and volume != ''
+                and float(volume) > 0
+            ):
                 filtered.append(t)
 
         top = sorted(filtered, key=lambda x: float(x["volume"]), reverse=True)
-        return [t["market"] for t in top[:30]]
+        symbols = [t["market"] for t in top[:30]]
+        print("✅ العملات المختارة:", symbols)
+        return symbols
 
     except Exception as e:
         print("🔴 خطأ في get_top_30:", e)
