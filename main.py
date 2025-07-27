@@ -47,17 +47,22 @@ def get_top_30():
     try:
         print("🔄 جلب البيانات من Bitvavo...")
         tickers = BITVAVO.ticker24h({})
-        print("📦 الرد الخام:\n", tickers)  # أضف هذا السطر مؤقتاً
-
         if isinstance(tickers, str):
             tickers = json.loads(tickers)
 
         filtered = []
         for t in tickers:
-            if t.get("market", "").endswith("-EUR") and "priceChangePercentage" in t:
-                filtered.append(t)
+            if t.get("market", "").endswith("-EUR") and t.get("open") and t.get("last"):
+                try:
+                    open_price = float(t["open"])
+                    last_price = float(t["last"])
+                    change = ((last_price - open_price) / open_price) * 100
+                    t["change"] = change
+                    filtered.append(t)
+                except:
+                    continue
 
-        top = sorted(filtered, key=lambda x: float(x["priceChangePercentage"]), reverse=True)
+        top = sorted(filtered, key=lambda x: x["change"], reverse=True)
         top_symbols = [t["market"] for t in top[:30]]
         print(f"✅ العملات المختارة: {top_symbols}")
         return top_symbols
