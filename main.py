@@ -73,24 +73,25 @@ def compute_bollinger_bands(closes):
 def analyze(symbol):
     try:
         candles = get_candles(symbol)
-        if len(candles) < 10:
+        if len(candles) < 6:
             return
-
-        closes = [float(c[4]) for c in candles]
-        sma, upper, lower = compute_bollinger_bands(closes)
 
         current_price = get_price(symbol)
         if not current_price:
             return
 
-        # شرط القرب من الحد السفلي
-        if current_price > lower * 1.02:
+        # ✅ تحقق من 5 شمعات حمراء
+        last_6 = candles[-6:]
+        last_5_red = all(float(c[4]) < float(c[1]) for c in last_6[:-1])
+        if not last_5_red:
             return
 
-        # تحقق من الشمعة الأخيرة صاعدة
-        latest = candles[-1]
-        open_, close = float(latest[1]), float(latest[4])
+        # ✅ تحقق من الشمعة الأخيرة خضراء وقوية
+        last = last_6[-1]
+        open_, close = float(last[1]), float(last[4])
         if close <= open_:
+            return
+        if ((close - open_) / open_) * 100 < 0.3:
             return
 
         # ✅ تنفيذ الشراء
@@ -102,9 +103,9 @@ def analyze(symbol):
             "amount": str(BUY_AMOUNT)
         }
         BITVAVO.placeOrder(payload)
-        send_message(f"✅ اشترينا {base} (النمس 🐆)")
+        send_message(f"✅ اشترينا {base} 🚀 بعد 5 حمر + شمعة خضراء")
 
-        # ✅ راقب للبيع
+        # ✅ المراقبة للبيع
         threading.Thread(target=watch_sell, args=(symbol, current_price)).start()
 
     except Exception as e:
