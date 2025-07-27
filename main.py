@@ -4,21 +4,21 @@ import time
 import redis
 import threading
 import requests
+import statistics
 from flask import Flask, request
 from bitvavo_client.bitvavo import Bitvavo
 
 app = Flask(__name__)
 r = redis.from_url(os.getenv("REDIS_URL"))
 
-# ✅ جلب المفاتيح من environment وتحقق منها
+# إعداد المفاتيح
 key = os.getenv("BITVAVO_API_KEY")
 secret = os.getenv("BITVAVO_API_SECRET")
 
 if not key or not secret:
-    print("❌ تأكد من وجود BITVAVO_API_KEY و BITVAVO_API_SECRET في إعدادات Railway")
+    print("❌ تأكد من وجود BITVAVO_API_KEY و BITVAVO_API_SECRET")
     exit()
 
-# ✅ إنشاء كائن Bitvavo
 BITVAVO = Bitvavo({
     'APIKEY': key,
     'APISECRET': secret,
@@ -26,50 +26,20 @@ BITVAVO = Bitvavo({
     'WSURL': 'wss://ws.bitvavo.com/v2/'
 })
 
+# إعدادات عامة
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 CHAT_ID = os.getenv("CHAT_ID")
 BUY_AMOUNT = 10
 WATCHLIST_KEY = "scalper:watchlist"
 
-# ✅ تيليغرام
 def send_message(text):
     try:
-        print("📤 إرسال تيليغرام:", text)
         requests.post(f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage", data={
             "chat_id": CHAT_ID,
             "text": text
         })
-    except Exception as e:
-        print("❌ تيليغرام:", e)
-
-# ✅ جلب Top 30
-def get_top_30():
-    try:
-        print("🔄 جلب البيانات من Bitvavo...")
-        tickers = BITVAVO.ticker24h({})
-        if isinstance(tickers, str):
-            tickers = json.loads(tickers)
-
-        filtered = []
-        for t in tickers:
-            if t.get("market", "").endswith("-EUR") and t.get("open") and t.get("last"):
-                try:
-                    open_price = float(t["open"])
-                    last_price = float(t["last"])
-                    change = ((last_price - open_price) / open_price) * 100
-                    t["change"] = change
-                    filtered.append(t)
-                except:
-                    continue
-
-        top = sorted(filtered, key=lambda x: x["change"], reverse=True)
-        top_symbols = [t["market"] for t in top[:30]]
-        print(f"✅ العملات المختارة: {top_symbols}")
-        return top_symbols
-
-    except Exception as e:
-        print("🔴 خطأ جلب العملات:", e)
-        return []
+    except:
+        pass
 
 # ✅ السعر الحالي
 def get_price(symbol):
@@ -78,51 +48,52 @@ def get_price(symbol):
         if isinstance(res, str):
             res = json.loads(res)
         return float(res['price'])
-    except Exception as e:
-        print(f"🔴 خطأ السعر {symbol}:", e)
+    except:
         return None
 
-# ✅ شموع
+# ✅ شموع 1m (10 شموع)
 def get_candles(symbol):
     try:
-        res = BITVAVO.candles(symbol, {'interval': '1m', 'limit': 3})
+        res = BITVAVO.candles(symbol, {'interval': '1m', 'limit': 10})
         if isinstance(res, str):
             res = json.loads(res)
         return res
-    except Exception as e:
-        print(f"🔴 خطأ الشموع {symbol}:", e)
+    except:
         return []
 
-# ✅ تحليل وشراء
+# ✅ حساب حدود بولينجر بناءً على 10 شموع
+def compute_bollinger_bands(closes):
+    sma = statistics.mean(closes)
+    std_dev = statistics.stdev(closes)
+    upper = sma + 2 * std_dev
+    lower = sma - 2 * std_dev
+    return sma, upper, lower
+
+# ✅ التحليل والشراء
 def analyze(symbol):
     try:
-        print(f"🔍 تحليل {symbol}...")
         candles = get_candles(symbol)
-        if len(candles) < 3:
-            print(f"⛔ أقل من 3 شموع: {symbol}")
+        if len(candles) < 10:
             return
 
-        latest = candles[-1]
-        open_, high, low, close = map(float, latest[1:5])
+        closes = [float(c[4]) for c in candles]
+        sma, upper, lower = compute_bollinger_bands(closes)
+
         current_price = get_price(symbol)
         if not current_price:
-            print(f"⛔ لم نستطع جلب سعر {symbol}")
             return
 
-        lower = min(float(c[3]) for c in candles)
+        # شرط القرب من الحد السفلي
         if current_price > lower * 1.02:
-            print(f"⛔ السعر مرتفع جداً {symbol}")
             return
 
+        # تحقق من الشمعة الأخيرة صاعدة
+        latest = candles[-1]
+        open_, close = float(latest[1]), float(latest[4])
         if close <= open_:
-            print(f"⛔ الشمعة ليست خضراء {symbol}")
             return
 
-        if ((close - open_) / open_) * 100 < 0.3:
-            print(f"⛔ شمعة ضعيفة {symbol}")
-            return
-
-        # ✅ شراء
+        # ✅ تنفيذ الشراء
         base = symbol.split("-")[0]
         payload = {
             "market": symbol,
@@ -131,14 +102,15 @@ def analyze(symbol):
             "amount": str(BUY_AMOUNT)
         }
         BITVAVO.placeOrder(payload)
-        send_message(f"✅ اشترينا {base} 🧠 (النمس)")
+        send_message(f"✅ اشترينا {base} (النمس 🐆)")
 
+        # ✅ راقب للبيع
         threading.Thread(target=watch_sell, args=(symbol, current_price)).start()
 
     except Exception as e:
         print(f"❌ تحليل {symbol}:", e)
 
-# ✅ متابعة البيع
+# ✅ مراقبة البيع
 def watch_sell(symbol, buy_price):
     try:
         peak = buy_price
@@ -165,11 +137,30 @@ def watch_sell(symbol, buy_price):
             "amount": str(BUY_AMOUNT)
         }
         BITVAVO.placeOrder(payload)
-        send_message(f"🚪 بيعنا {base} 🔁 (النمس)")
+        send_message(f"🚪 بيعنا {base} (النمس 🐆)")
     except Exception as e:
         print(f"❌ بيع {symbol}:", e)
 
-# ✅ حلقة النمس
+# ✅ جلب Top 30 عملة حسب حجم التداول
+def get_top_30():
+    try:
+        tickers = BITVAVO.ticker24h({})
+        if isinstance(tickers, str):
+            tickers = json.loads(tickers)
+
+        filtered = []
+        for t in tickers:
+            if t.get("market", "").endswith("-EUR") and "volume" in t:
+                filtered.append(t)
+
+        top = sorted(filtered, key=lambda x: float(x["volume"]), reverse=True)
+        return [t["market"] for t in top[:30]]
+
+    except Exception as e:
+        print("🔴 خطأ في get_top_30:", e)
+        return []
+
+# ✅ حلقة التحديث والمراقبة
 def run_bot():
     while True:
         try:
@@ -179,30 +170,32 @@ def run_bot():
             for symbol in top:
                 r.sadd(WATCHLIST_KEY, symbol)
             time.sleep(30)
+        except Exception as e:
+            print("❌ خطأ في تحديث القائمة:", e)
 
+def monitor_loop():
+    while True:
+        try:
             for symbol in r.smembers(WATCHLIST_KEY):
                 symbol = symbol.decode()
                 threading.Thread(target=analyze, args=(symbol,)).start()
                 time.sleep(3)
         except Exception as e:
-            print("🔴 حلقة النمس:", e)
+            print("❌ خطأ في المراقبة:", e)
 
-# ✅ أمر تيليغرام
+# ✅ أمر "شو عم تعمل"
 @app.route('/webhook', methods=['POST'])
 def webhook():
-    try:
-        msg = request.json.get("message", {}).get("text", "")
-        if "شو عم تعمل" in msg:
-            coins = r.smembers(WATCHLIST_KEY)
-            msg = "🕵️ العملات تحت المراقبة:\n"
-            msg += "\n".join([c.decode() for c in coins]) if coins else "لا شيء حالياً"
-            send_message(msg)
-        return "ok"
-    except Exception as e:
-        print("❌ Webhook:", e)
-        return "error"
+    msg = request.json.get("message", {}).get("text", "")
+    if "شو عم تعمل" in msg:
+        coins = r.smembers(WATCHLIST_KEY)
+        msg = "🕵️ العملات تحت المراقبة:\n"
+        msg += "\n".join([c.decode() for c in coins]) if coins else "لا شيء حالياً"
+        send_message(msg)
+    return "ok"
 
-# ✅ تشغيل
+# ✅ تشغيل البوت
 if __name__ == '__main__':
     threading.Thread(target=run_bot).start()
+    threading.Thread(target=monitor_loop).start()
     app.run(host="0.0.0.0", port=int(os.getenv("PORT", 8080)))
