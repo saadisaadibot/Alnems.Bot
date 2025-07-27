@@ -1,242 +1,160 @@
-import os
-import redis
-import requests
-import json
-import time
-import hmac
-import hashlib
+import os, time, json, hmac, hashlib, requests
 from flask import Flask, request
 from threading import Thread
 
 app = Flask(__name__)
-BITVAVO_API_KEY = os.getenv("BITVAVO_API_KEY")
-BITVAVO_API_SECRET = os.getenv("BITVAVO_API_SECRET")
+
+# مفاتيح البيئة
+API_KEY = os.getenv("SCALPER_API_KEY")
+API_SECRET = os.getenv("SCALPER_API_SECRET")
+BUY_AMOUNT_EUR = float(os.getenv("SCALPER_BUY_AMOUNT", 10))
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 CHAT_ID = os.getenv("CHAT_ID")
-REDIS_URL = os.getenv("REDIS_URL")
-r = redis.from_url(REDIS_URL)
-BUY_AMOUNT_EUR = float(os.getenv("BUY_AMOUNT_EUR", 20))
+bitvavo_url = "https://api.bitvavo.com/v2"
 
+# حالة التشغيل
+is_running = True
+symbol_in_position = None
+entry_price = 0
+position_active = False
+profits = []
 
-def send_message(text):
-    requests.post(f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage", data={"chat_id": CHAT_ID, "text": text})
-
-
-def create_signature(timestamp, method, path, body):
-    body_str = json.dumps(body, separators=(',', ':')) if body else ""
-    msg = f"{timestamp}{method}{path}{body_str}"
-    return hmac.new(BITVAVO_API_SECRET.encode(), msg.encode(), hashlib.sha256).hexdigest()
-
-
-def bitvavo_request(method, path, body=None):
-    timestamp = str(int(time.time() * 1000))
-    signature = create_signature(timestamp, method, f"/v2{path}", body)
-    headers = {
-        'Bitvavo-Access-Key': BITVAVO_API_KEY,
-        'Bitvavo-Access-Timestamp': timestamp,
-        'Bitvavo-Access-Signature': signature,
-        'Bitvavo-Access-Window': '10000'
+# توقيع الطلبات
+def headers(t, method, path, body):
+    msg = f"{t}{method}{path}{body}"
+    return {
+        "Bitvavo-Access-Key": API_KEY,
+        "Bitvavo-Access-Timestamp": t,
+        "Bitvavo-Access-Signature": hmac.new(API_SECRET.encode(), msg.encode(), hashlib.sha256).hexdigest(),
+        "Bitvavo-Access-Window": "10000",
+        "Content-Type": "application/json"
     }
-    try:
-        response = requests.request(method, f"https://api.bitvavo.com/v2{path}", headers=headers, json=body or {})
-        return response.json()
-    except Exception as e:
-        return {"error": str(e)}
 
+# إرسال طلب
+def bitvavo_request(method, path, body=None):
+    t = str(int(time.time() * 1000))
+    body_str = json.dumps(body) if body else ""
+    h = headers(t, method, path, body_str)
+    r = requests.request(method, bitvavo_url + path, headers=h, data=body_str)
+    return r.json()
 
-def fetch_price(symbol):
+# تيليغرام
+def send_message(text):
     try:
-        url = f"https://api.bitvavo.com/v2/ticker/price?market={symbol}"
-        res = requests.get(url)
-        return float(res.json()["price"]) if res.status_code == 200 else None
+        requests.post(f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage", data={"chat_id": CHAT_ID, "text": text})
     except:
-        return None
+        pass
 
+# بيع
+def sell_order(symbol, amount):
+    return bitvavo_request("POST", f"/order", {
+        "market": symbol,
+        "amount": str(amount),
+        "side": "sell",
+        "orderType": "market"
+    })
 
-def sell(symbol):
-    if r.hexists("failed_sells", symbol):
-        send_message(f"⚠️ تم تجاهل محاولة بيع مكررة لـ {symbol} بعد فشل سابق.")
-        return
+# شراء
+def buy_order(symbol):
+    return bitvavo_request("POST", f"/order", {
+        "market": symbol,
+        "amountQuote": str(BUY_AMOUNT_EUR),
+        "side": "buy",
+        "orderType": "market"
+    })
 
-    coin = symbol.split("-")[0]
-    balance = bitvavo_request("GET", "/balance")
-    coin_balance = next((b['available'] for b in balance if b['symbol'] == coin), '0')
-    if float(coin_balance) > 0:
-        price = fetch_price(symbol)
-        entry = float(r.hget("entry", symbol))
-        amount = float(coin_balance)
-        profit_eur = (price - entry) * amount
-        percent = (price - entry) / entry * 100
+# الشموع
+def get_candles(symbol, interval="1m", limit=4):
+    return bitvavo_request("GET", f"/{symbol}/candles", {"interval": interval, "limit": limit})
 
-        order_body = {
-            "amount": str(amount),
-            "market": symbol,
-            "side": "sell",
-            "orderType": "market",
-            "operatorId": ""
-        }
-        result = bitvavo_request("POST", "/order", order_body)
-        if "error" not in result:
-            r.hset("orders", symbol, f"بيع | {round(profit_eur,2)} EUR | {round(percent,2)}%")
-            r.hset("profits", symbol, json.dumps({
-                "entry": entry,
-                "exit": price,
-                "profit": profit_eur,
-                "percent": percent,
-                "source": r.hget("source", symbol).decode() if r.hexists("source", symbol) else "manual"
-            }))
-            send_message(f"✅ بيع {symbol} تم بنجاح\n💰 ربح: {round(profit_eur,2)} EUR ({round(percent,2)}%)")
-        else:
-            send_message(f"❌ فشل البيع: {result['error']}")
-            r.hset("failed_sells", symbol, "true")
-    else:
-        send_message(f"⚠️ لا يوجد رصيد كافٍ لبيع {symbol}")
+# الأسواق
+def get_markets():
+    return [m["market"] for m in bitvavo_request("GET", "/markets") if m["quote"] == "EUR"]
 
-
-def watch():
+# اختيار ودخول الصفقة
+def analyze_and_buy():
+    global symbol_in_position, entry_price, position_active, is_running
     while True:
+        if position_active or not is_running:
+            time.sleep(1)
+            continue
         try:
-            orders = r.hgetall("orders")
-            for key, status in orders.items():
-                symbol = key.decode()
-                if "شراء" not in status.decode():
+            for symbol in get_markets():
+                candles = get_candles(symbol)
+                if len(candles) < 4:
                     continue
-                price = fetch_price(symbol)
-                if price is None:
-                    continue
-                entry = float(r.hget("entry", symbol))
-                peak = float(r.hget("peak", symbol) or entry)
-                change = ((price - entry) / entry) * 100
-                peak = max(peak, price)
-                r.hset("peak", symbol, peak)
-                drop = ((price - peak) / peak) * 100
-
-                if change <= -2:
-                    send_message(f"🛑 Stop Loss مفعل لـ {symbol}")
-                    sell(symbol)
-
-                elif change >= 3 and not r.hexists("alerts", f"{symbol}-peak"):
-                    send_message(f"🚀 {symbol} تجاوز +3%! يراقب تراجع -1% من القمة.")
-                    r.hset("alerts", f"{symbol}-peak", 1)
-
-                elif change >= 3 and drop <= -1:
-                    send_message(f"📉 تراجع -1% من القمة: {symbol}")
-                    sell(symbol)
-                    r.hdel("alerts", f"{symbol}-peak")
-
-                elif change >= 3 and change < 1:
-                    send_message(f"📉 تراجع من +3% إلى أقل من +1%: {symbol}")
-                    sell(symbol)
-                    r.hdel("alerts", f"{symbol}-peak")
-
+                prices = [float(c[4]) for c in candles]
+                bodies = [abs(float(c[4]) - float(c[1])) for c in candles]
+                ranges = [abs(float(c[2]) - float(c[3])) for c in candles]
+                if prices[-1] > max(prices[:-1]) and bodies[-1] > 0.5 * ranges[-1]:
+                    res = buy_order(symbol)
+                    price = float(res.get("fills", [{}])[0].get("price", 0))
+                    if price > 0:
+                        symbol_in_position = symbol
+                        entry_price = price
+                        position_active = True
+                        send_message(f"✅ النمس اشترى {symbol} بسعر {price} EUR")
+                        Thread(target=monitor_position).start()
+                        break
         except Exception as e:
-            print("❌ Error in watch:", str(e))
+            print("❌", e)
         time.sleep(1)
 
+# مراقبة الصفقة
+def monitor_position():
+    global symbol_in_position, entry_price, position_active
+    while position_active:
+        try:
+            book = bitvavo_request("GET", f"/{symbol_in_position}/book")
+            price = float(book.get("asks", [[0]])[0][0])
+            profit = (price - entry_price) / entry_price * 100
+            if profit >= 1 or profit <= -0.5:
+                coin = symbol_in_position.split("-")[0]
+                amount = float(bitvavo_request("GET", f"/balance/{coin}")["available"])
+                sell_order(symbol_in_position, amount)
+                send_message(f"{'💰' if profit > 0 else '⚠️'} النمس باع {symbol_in_position} بربح {round(profit,2)}%")
+                profits.append(round(profit, 2))
+                symbol_in_position = None
+                entry_price = 0
+                position_active = False
+                break
+        except Exception as e:
+            print("⚠️", e)
+        time.sleep(0.5)
 
-@app.route("/webhook", methods=["POST"])
+# أوامر تيليغرام
+@app.route("/", methods=["POST"])
 def webhook():
-    data = request.get_json()
-    if not data or "message" not in data:
-        return '', 200
+    global is_running
+    data = request.json
+    msg = data.get("message", {})
+    text = msg.get("text", "")
+    if not text:
+        return "", 200
+    if "stop" in text:
+        is_running = False
+        send_message("⛔ تم إيقاف الشراء مؤقتًا.")
+    elif "play" in text:
+        is_running = True
+        send_message("▶️ تم تفعيل الشراء.")
+    elif "الملخص" in text:
+        if not profits:
+            send_message("لا توجد صفقات بعد.")
+        else:
+            win = [p for p in profits if p > 0]
+            loss = [p for p in profits if p <= 0]
+            total = sum(profits)
+            msg = f"""📊 ملخص Scalper النمس:
+الصفقات: {len(profits)}
+✅ أرباح: {len(win)} صفقة
+❌ خسائر: {len(loss)} صفقة
+📈 الربح الصافي: {round(total,2)}%
+"""
+            send_message(msg)
+    return "", 200
 
-    text = data["message"].get("text", "").strip().lower()
-
-    if "الملخص" in text:
-        records = r.hgetall("profits")
-        total = 0
-        sources = {}
-        source_sums = {}
-        for v in records.values():
-            item = json.loads(v.decode())
-            total += item["profit"]
-            source = item.get("source", "manual")
-            sources[source] = sources.get(source, 0) + 1
-            source_sums[source] = source_sums.get(source, 0) + item["profit"]
-
-        total_trades = sum(sources.values())
-        percent_total = round((total / (BUY_AMOUNT_EUR * total_trades)) * 100, 2) if total_trades else 0
-        msg = f"""📊 ملخص الأرباح:
-إجمالي الربح: {round(total,2)} EUR ({percent_total}%)
-""" + "\n".join([f"• {s.capitalize()}: {round(source_sums[s],2)} EUR من {sources[s]} صفقة" for s in sources])
-        send_message(msg)
-
-    elif "امسح الذاكرة" in text:
-        r.flushall()
-        send_message("🧹 تم مسح الذاكرة.")
-
-    elif "الرصيد" in text:
-        balance = bitvavo_request("GET", "/balance")
-        try:
-            eur = next((b['available'] for b in balance if b['symbol'] == 'EUR'), '0')
-            send_message(f"💰 الرصيد المتاح: {eur} EUR")
-        except:
-            send_message("❌ فشل جلب الرصيد.")
-
-    elif "اشتري" in text and "يا توتو" in text:
-        try:
-            parts = text.split()
-            coin = parts[1].upper()
-            symbol = coin + "-EUR"
-            if "ridder" in text:
-                source = "ridder"
-            elif "bottom" in text:
-                source = "bottom"
-            elif "sniper" in text:
-                source = "sniper"
-            else:
-                source = "manual"
-
-            balance = bitvavo_request("GET", "/balance")
-            eur_balance = next((float(b['available']) for b in balance if b['symbol'] == 'EUR'), 0)
-
-            if eur_balance < BUY_AMOUNT_EUR:
-                send_message(f"🚫 لا يمكن شراء {symbol}، الرصيد غير كافٍ ({eur_balance:.2f} EUR).")
-                return '', 200
-
-            order_body = {
-                "amountQuote": str(BUY_AMOUNT_EUR),
-                "market": symbol,
-                "side": "buy",
-                "orderType": "market",
-                "operatorId": ""
-            }
-            result = bitvavo_request("POST", "/order", order_body)
-            if "orderId" in result:
-                order_id = result["orderId"]
-                order_check = bitvavo_request("GET", f"/order?market={symbol}&orderId={order_id}")
-                if order_check.get("status") == "filled":
-                    price = float(order_check["avgPrice"])
-                    filled = float(order_check.get("filledAmount", 0))
-                    r.hset("orders", symbol, "شراء")
-                    r.hset("entry", symbol, price)
-                    r.hset("peak", symbol, price)
-                    r.hset("source", symbol, source)
-                    send_message(f"✅ تم شراء {symbol} بكمية {filled} بسعر {price} EUR")
-                else:
-                    send_message(f"❌ لم يتم تنفيذ الشراء الكامل لـ {symbol}")
-            else:
-                send_message(f"❌ فشل الشراء: {result.get('error', 'غير معروف')}")
-        except Exception as e:
-            send_message(f"❌ خطأ في الشراء: {str(e)}")
-
-    elif "بيع" in text and "يا توتو" in text:
-        try:
-            coin = text.split()[1].upper()
-            symbol = coin + "-EUR"
-            sell(symbol)
-        except Exception as e:
-            send_message(f"❌ خطأ في البيع: {str(e)}")
-
-    return '', 200
-
-
-@app.route("/")
-def home():
-    return "Toto Premium 🟢", 200
-
-
+# تشغيل
 if __name__ == "__main__":
-    send_message("🚀 Toto Premium بدأ العمل!")
-    Thread(target=watch).start()
+    send_message("🐾 النمس بدأ العمل!")
+    Thread(target=analyze_and_buy).start()
     app.run(host="0.0.0.0", port=8080)
