@@ -1,3 +1,5 @@
-Flask
+flask
 requests
-python-dotenv
+websocket-client
+python-bitvavo-api
+redis
