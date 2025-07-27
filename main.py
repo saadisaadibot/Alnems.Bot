@@ -47,6 +47,8 @@ def get_top_30():
     try:
         print("🔄 جلب البيانات من Bitvavo...")
         tickers = BITVAVO.ticker24h({})
+        print("📦 الرد الخام:\n", tickers)  # أضف هذا السطر مؤقتاً
+
         if isinstance(tickers, str):
             tickers = json.loads(tickers)
 
