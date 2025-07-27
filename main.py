@@ -8,7 +8,8 @@ app = Flask(__name__)
 BITVAVO = Bitvavo({
     'APIKEY': os.getenv("BITVAVO_API_KEY"),
     'APISECRET': os.getenv("BITVAVO_API_SECRET"),
-    'RESTURL': 'https://api.bitvavo.com/v2'
+    'RESTURL': 'https://api.bitvavo.com/v2',
+    'WSURL': 'wss://ws.bitvavo.com/v2/'
 })
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 CHAT_ID = os.getenv("CHAT_ID")
@@ -19,6 +20,7 @@ is_running = True
 symbol_in_position = None
 entry_price = 0
 profits = []
+monitored_symbols = []  # 🟡 العملات التي تتم مراقبتها
 
 # 📨 تيليغرام
 def send_message(text):
@@ -26,7 +28,8 @@ def send_message(text):
         requests.post(f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage", data={
             "chat_id": CHAT_ID, "text": text
         })
-    except: pass
+    except:
+        pass
 
 # 📦 بيع وشراء
 def buy(symbol):
@@ -45,57 +48,57 @@ def sell(symbol, amount):
         'amount': str(amount)
     })
 
-# 📊 تحليل العملات
+# 📊 الشمعة المتأرجحة
 def watch_symbols():
-    def analyze():
+    def analyze(symbol):
         global symbol_in_position, entry_price
 
-        while True:
+        def callback(msg):
+            nonlocal symbol
             if not is_running or symbol_in_position:
-                time.sleep(3)
-                continue
+                return
 
             try:
-                markets = BITVAVO.markets()
-                top = sorted(
-                    [m for m in markets if m['quote'] == 'EUR'],
-                    key=lambda x: float(x.get("volume", 0)),
-                    reverse=True
-                )[:30]
+                price = float(msg['price'])
+                candles = BITVAVO.candles(symbol, {'interval': '1m', 'limit': 3})
+                if len(candles) < 3: return
+                c1, c2, c3 = [float(c[4]) for c in candles[-3:]]
 
-                for m in top:
-                    symbol = m['market']
-                    candles = BITVAVO.candles(symbol, {'interval': '1m', 'limit': 3})
-                    if len(candles) < 3:
-                        continue
-
-                    c1, c2, c3 = [float(c[4]) for c in candles[-3:]]
-                    current = float(candles[-1][4])
-
-                    # استراتيجية الشمعة المتأرجحة
-                    if c3 > c2 and c2 < c1 and current <= c2 * 1.01:
-                        res = buy(symbol)
-                        filled_price = float(res.get("fills", [{}])[0].get("price", 0))
-                        if filled_price:
-                            symbol_in_position = symbol
-                            entry_price = filled_price
-                            send_message(f"✅ النمس دخل {symbol} بسعر {filled_price} EUR")
-                            threading.Thread(target=track_sell, args=(symbol,)).start()
-                            break
+                # استراتيجية الشمعة المتأرجحة:
+                if c3 > c2 and c2 < c1 and price <= c2 * 1.01:
+                    res = buy(symbol)
+                    filled_price = float(res.get("fills", [{}])[0].get("price", 0))
+                    if filled_price:
+                        symbol_in_position = symbol
+                        entry_price = filled_price
+                        send_message(f"✅ النمس دخل {symbol} بسعر {filled_price} EUR")
+                        threading.Thread(target=track_sell, args=(symbol,)).start()
             except Exception as e:
                 print("❌ تحليل:", e)
 
-            time.sleep(3)
+        try:
+            monitored_symbols.append(symbol)
+            BITVAVO.websocket.ticker(symbol, callback)
+        except Exception as e:
+            print(f"❌ WebSocket فشل {symbol}:", e)
 
-    threading.Thread(target=analyze).start()
+    markets = BITVAVO.markets()
+    top = sorted(
+        [m for m in markets if m['quote'] == 'EUR'],
+        key=lambda x: float(x.get("volume", 0)),
+        reverse=True
+    )[:30]
+
+    for m in top:
+        threading.Thread(target=analyze, args=(m['market'],)).start()
 
 # 💰 تتبع البيع
 def track_sell(symbol):
     global symbol_in_position, entry_price
     try:
         while True:
-            ticker = BITVAVO.tickerPrice(symbol)
-            price = float(ticker["price"])
+            book = BITVAVO.book(symbol)
+            price = float(book["asks"][0][0])
             profit = (price - entry_price) / entry_price * 100
 
             if profit >= 1 or profit <= -0.5:
@@ -112,7 +115,7 @@ def track_sell(symbol):
     except Exception as e:
         print("⚠️ تتبع البيع:", e)
 
-# 🧠 أوامر تيليغرام
+# 🧠 الأوامر
 @app.route("/webhook", methods=["POST"])
 def webhook():
     global is_running
@@ -139,11 +142,21 @@ def webhook():
 📈 صافي الربح: {round(total, 2)}%
 """
             send_message(msg)
+    elif "شو عم تعمل" in text:
+        msg = "📡 العملات قيد المراقبة:\n"
+        if symbol_in_position:
+            msg += f"🟢 دخول حالي: {symbol_in_position} بسعر {entry_price}\n"
+        if not monitored_symbols:
+            msg += "لا توجد عملات تحت المراقبة حالياً."
+        else:
+            msg += "\n".join([f"🔸 {s}" for s in monitored_symbols])
+        send_message(msg)
+
     return "", 200
 
-# 🚀 بدء التشغيل
+# 🚀 بدء
 if __name__ == "__main__":
-    send_message("🐾 النمس بدأ - الشمعة المتأرجحة™ (بدون WebSocket)")
-    watch_symbols()
+    send_message("🐾 النمس بدأ - الشمعة المتأرجحة™")
+    threading.Thread(target=watch_symbols).start()
     port = int(os.environ.get("PORT", 8080))
     app.run(host="0.0.0.0", port=port)
