@@ -10,9 +10,17 @@ from bitvavo_client.bitvavo import Bitvavo
 app = Flask(__name__)
 r = redis.from_url(os.getenv("REDIS_URL"))
 
+# ✅ تحقق من وجود المفاتيح قبل إنشاء Bitvavo
+key = os.getenv("SCALPER_API_KEY")
+secret = os.getenv("SCALPER_API_SECRET")
+
+if not key or not secret:
+    print("❌ تأكد من وجود SCALPER_API_KEY و SCALPER_API_SECRET في إعدادات Railway")
+    exit()
+
 BITVAVO = Bitvavo({
-    'APIKEY': os.getenv("SCALPER_API_KEY"),
-    'APISECRET': os.getenv("SCALPER_API_SECRET"),
+    'APIKEY': key,
+    'APISECRET': secret,
     'RESTURL': 'https://api.bitvavo.com/v2',
     'WSURL': 'wss://ws.bitvavo.com/v2/'
 })
@@ -71,12 +79,11 @@ def analyze(symbol):
         latest = candles[-1]
         open_, high, low, close = map(float, latest[1:5])
 
-        # سعر حالي
         current_price = get_price(symbol)
         if not current_price:
             return
 
-        lower_bound = min([float(c[3]) for c in candles])  # أقل سعر إغلاق
+        lower_bound = min([float(c[3]) for c in candles])
         if current_price > lower_bound * 1.02:
             return
 
@@ -86,7 +93,6 @@ def analyze(symbol):
         if ((close - open_) / open_) * 100 < 0.3:
             return
 
-        # شراء
         base = symbol.split("-")[0]
         payload = {
             "market": symbol,
@@ -97,7 +103,6 @@ def analyze(symbol):
         BITVAVO.placeOrder(payload)
         send_message(f"✅ اشترينا {base} 🧠 (النمس)")
 
-        # راقب للبيع
         threading.Thread(target=watch_sell, args=(symbol, current_price)).start()
 
     except Exception as e:
