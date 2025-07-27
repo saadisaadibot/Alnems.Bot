@@ -1,68 +1,64 @@
-import os, time, json, hmac, hashlib, requests
+import os, json, hmac, hashlib, time, requests
 from flask import Flask, request
 from threading import Thread
+from websocket import WebSocketApp
 
 app = Flask(__name__)
 
-# 🟢 المفاتيح من البيئة
+# 🟢 مفاتيح البيئة
 BITVAVO_API_KEY = os.getenv("BITVAVO_API_KEY")
 BITVAVO_API_SECRET = os.getenv("BITVAVO_API_SECRET")
-BUY_AMOUNT_EUR = float(os.getenv("BUY_AMOUNT_EUR", 10))
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 CHAT_ID = os.getenv("CHAT_ID")
-bitvavo_url = "https://api.bitvavo.com/v2"
+BUY_AMOUNT_EUR = float(os.getenv("BUY_AMOUNT_EUR", 10))
+bitvavo_rest = "https://api.bitvavo.com/v2"
+bitvavo_ws = "wss://ws.bitvavo.com/v2"
 
-if not all([BITVAVO_API_KEY, BITVAVO_API_SECRET, BOT_TOKEN, CHAT_ID]):
-    raise ValueError("❌ تأكد من إعداد جميع المفاتيح.")
-
-# 🔄 الحالة العامة
+# 🔁 حالة البوت
 is_running = True
 symbol_in_position = None
 entry_price = 0
-position_active = False
 profits = []
 top_symbols = []
-last_update = 0
+last_top_update = 0
 
-# توليد الهيدر
-def headers(t, method, path, body):
-    msg = f"{t}{method}{path}{body}"
+# 📨 Telegram
+def send_message(text):
+    try:
+        requests.post(f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage", data={
+            "chat_id": CHAT_ID, "text": text})
+    except: pass
+
+# 🔐 Headers
+def headers(ts, method, path, body=""):
+    msg = f"{ts}{method}{path}{body}"
     return {
         "Bitvavo-Access-Key": BITVAVO_API_KEY,
-        "Bitvavo-Access-Timestamp": t,
+        "Bitvavo-Access-Timestamp": ts,
         "Bitvavo-Access-Signature": hmac.new(BITVAVO_API_SECRET.encode(), msg.encode(), hashlib.sha256).hexdigest(),
         "Bitvavo-Access-Window": "10000",
         "Content-Type": "application/json"
     }
 
-# طلب API
+# 🌐 API Request
 def bitvavo_request(method, path, body=None):
-    t = str(int(time.time() * 1000))
+    ts = str(int(time.time() * 1000))
     body_str = json.dumps(body) if body else ""
-    h = headers(t, method, path, body_str)
-    r = requests.request(method, bitvavo_url + path, headers=h, data=body_str)
+    h = headers(ts, method, path, body_str)
+    res = requests.request(method, bitvavo_rest + path, headers=h, data=body_str)
+    try: return res.json()
+    except: return {}
+
+# 📊 الحصول على Top 30 عملة
+def update_top_symbols():
+    global top_symbols
     try:
-        return r.json()
-    except:
-        print("⚠️ رد غير صالح:", r.text)
-        return {}
+        all = bitvavo_request("GET", "/markets")
+        filtered = [m for m in all if m.get("quote") == "EUR" and float(m.get("volume", 0)) > 0]
+        top_symbols = sorted(filtered, key=lambda x: float(x["volume"]), reverse=True)[:30]
+    except: pass
 
-# تيليغرام
-def send_message(text):
-    try:
-        requests.post(f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage", data={"chat_id": CHAT_ID, "text": text})
-    except:
-        pass
-
-# بيع وشراء
-def sell_order(symbol, amount):
-    return bitvavo_request("POST", "/order", {
-        "market": symbol,
-        "amount": str(amount),
-        "side": "sell",
-        "orderType": "market"
-    })
-
+# 🛒 شراء فوري
 def buy_order(symbol):
     return bitvavo_request("POST", "/order", {
         "market": symbol,
@@ -71,127 +67,126 @@ def buy_order(symbol):
         "orderType": "market"
     })
 
-# بيانات السوق
-def get_candles(symbol, interval="1m", limit=20):
-    return bitvavo_request("GET", f"/{symbol}/candles", {"interval": interval, "limit": limit})
+# 💰 بيع فوري
+def sell_order(symbol, amount):
+    return bitvavo_request("POST", "/order", {
+        "market": symbol,
+        "amount": str(amount),
+        "side": "sell",
+        "orderType": "market"
+    })
 
-def get_markets():
-    return bitvavo_request("GET", "/markets")
-
-# تحديث قائمة Top 30 حسب الحجم
-def update_top_symbols():
-    global top_symbols
-    try:
-        markets = get_markets()
-        filtered = [
-            m for m in markets if isinstance(m, dict)
-            and m.get("quote") == "EUR"
-            and float(m.get("volume", 0)) > 0
-        ]
-        top_symbols = sorted(filtered, key=lambda x: float(x.get("volume", 0)), reverse=True)[:30]
-    except Exception as e:
-        print("❌ تحديث العملات النشيطة:", e)
-
-# تحليل العملات والدخول
-def analyze_and_buy():
-    global symbol_in_position, entry_price, position_active, is_running, top_symbols, last_update
-
-    while True:
-        if not is_running or position_active:
-            time.sleep(1)
-            continue
-
-        if time.time() - last_update > 30:
-            update_top_symbols()
-            last_update = time.time()
-
+# 📈 بدء WebSocket على عملة
+def start_socket(symbol):
+    def on_message(ws, msg):
+        global symbol_in_position, entry_price
+        if not is_running or symbol_in_position: return
         try:
-            for market in top_symbols:
-                symbol = market["market"]
-                candles = get_candles(symbol)
-                if not isinstance(candles, list) or len(candles) < 20:
-                    continue
+            data = json.loads(msg)
+            price = float(data["c"])
+            history.append(price)
+            if len(history) > 20:
+                history.pop(0)
 
-                closes = [float(c[4]) for c in candles]
-                ma = sum(closes) / len(closes)
-                std = (sum([(p - ma) ** 2 for p in closes]) / len(closes)) ** 0.5
-                upper = ma + 2 * std
-                lower = ma - 2 * std
-                current = closes[-1]
-
-                # دخول مرن + شرط الشمعة الصاعدة
-                if current <= lower * 1.02 and closes[-1] > closes[-2] * 1.003:
+            # 🔍 استراتيجية الشمعة المتأرجحة
+            if len(history) >= 5:
+                last = history[-1]
+                prev = history[-2]
+                pre_prev = history[-3]
+                if last > prev * 1.004 and prev < pre_prev * 0.997:
                     res = buy_order(symbol)
                     fills = res.get("fills", [{}])
-                    price = float(fills[0].get("price", 0)) if fills else 0
-                    if price > 0:
+                    p = float(fills[0].get("price", 0))
+                    if p > 0:
                         symbol_in_position = symbol
-                        entry_price = price
-                        position_active = True
-                        send_message(f"✅ الأرجوحة السريعة: شراء {symbol} عند {price} EUR")
-                        Thread(target=monitor_position_bollinger, args=(upper,)).start()
-                        break
-        except Exception as e:
-            print("❌", e)
-        time.sleep(3)  # فحص كل 3 ثواني فقط
+                        entry_price = p
+                        send_message(f"✅ اشترى {symbol} بسعر {p}")
+                        Thread(target=watch_trade).start()
+                        ws.close()
+        except: pass
 
-# مراقبة الصفقة
-def monitor_position_bollinger(upper_band):
-    global symbol_in_position, entry_price, position_active
-    while position_active:
+    def on_error(ws, e): pass
+    def on_close(ws): pass
+    def on_open(ws): ws.send(json.dumps({
+        "action": "subscribe",
+        "channels": [{"name": "ticker", "markets": [symbol]}]
+    }))
+
+    history = []
+    ws = WebSocketApp(f"{bitvavo_ws}", on_message=on_message, on_error=on_error, on_close=on_close, on_open=on_open)
+    Thread(target=ws.run_forever).start()
+
+# 👀 مراقبة الصفقة الحالية
+def watch_trade():
+    global symbol_in_position, entry_price
+    peak = entry_price
+    while True:
         try:
             book = bitvavo_request("GET", f"/{symbol_in_position}/book")
             price = float(book.get("asks", [[0]])[0][0])
+            if price > peak: peak = price
             profit = (price - entry_price) / entry_price * 100
-
-            if price >= upper_band or profit >= 1 or profit <= -0.5:
+            if profit >= 1 or profit <= -0.5:
                 coin = symbol_in_position.split("-")[0]
                 bal = bitvavo_request("GET", f"/balance/{coin}")
-                amount = float(bal.get("available", 0))
-                sell_order(symbol_in_position, amount)
-                send_message(f"{'💰' if profit > 0 else '⚠️'} بيع {symbol_in_position} | ربح {round(profit,2)}%")
+                amt = float(bal.get("available", 0))
+                sell_order(symbol_in_position, amt)
                 profits.append(round(profit, 2))
-                symbol_in_position = None
-                entry_price = 0
-                position_active = False
+                send_message(f"{'💰' if profit > 0 else '⚠️'} بيع {symbol_in_position} | {round(profit,2)}%")
                 break
-        except Exception as e:
-            print("⚠️", e)
+        except: pass
         time.sleep(0.5)
+    reset_trade()
 
-# أوامر تيليغرام
+def reset_trade():
+    global symbol_in_position, entry_price
+    symbol_in_position, entry_price = None, 0
+
+# 🔄 متابعة السوق
+def scanner():
+    global last_top_update
+    while True:
+        if not is_running or symbol_in_position:
+            time.sleep(1)
+            continue
+        if time.time() - last_top_update > 30:
+            update_top_symbols()
+            last_top_update = time.time()
+        for m in top_symbols:
+            if not is_running or symbol_in_position:
+                break
+            symbol = m["market"]
+            start_socket(symbol)
+            time.sleep(1)
+
+# 🎮 أوامر التليغرام
 @app.route("/webhook", methods=["POST"])
 def webhook():
     global is_running
     data = request.json
-    msg = data.get("message", {})
-    text = msg.get("text", "").lower()
-    if not text:
-        return "", 200
-    if "stop" in text:
+    txt = data.get("message", {}).get("text", "").lower()
+    if "stop" in txt:
         is_running = False
-        send_message("⛔ تم إيقاف الشراء مؤقتًا.")
-    elif "play" in text:
+        send_message("⛔ إيقاف الشراء.")
+    elif "play" in txt:
         is_running = True
         send_message("▶️ تم تفعيل الشراء.")
-    elif "الملخص" in text:
+    elif "الملخص" in txt:
         if not profits:
-            send_message("لا توجد صفقات بعد.")
+            send_message("لا صفقات بعد.")
         else:
             win = [p for p in profits if p > 0]
             loss = [p for p in profits if p <= 0]
             total = sum(profits)
-            msg = f"""📊 ملخص Scalper الأرجوحة السريعة:
-الصفقات: {len(profits)}
-✅ أرباح: {len(win)} صفقة
-❌ خسائر: {len(loss)} صفقة
-📈 الربح الصافي: {round(total,2)}%
-"""
-            send_message(msg)
+            send_message(f"""📊 ملخص Scalper الشمعة المتأرجحة:
+صفقات: {len(profits)}
+✅ أرباح: {len(win)}
+❌ خسائر: {len(loss)}
+📈 الربح الصافي: {round(total,2)}%""")
     return "", 200
 
-# تشغيل
+# 🚀 تشغيل
 if __name__ == "__main__":
-    send_message("🐾 النمس بدأ - الأرجوحة السريعة!")
-    Thread(target=analyze_and_buy).start()
+    send_message("🐾 النمس - الشمعة المتأرجحة بدأ!")
+    Thread(target=scanner).start()
     app.run(host="0.0.0.0", port=8080)
