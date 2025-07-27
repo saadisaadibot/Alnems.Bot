@@ -138,30 +138,35 @@ def watch_sell(symbol, buy_price):
 # ✅ جلب Top 30 عملة تحتوي على أكبر عدد شمعات حمراء
 def get_top_30():
     try:
-        print("🔍 فلترة العملات حسب عدد الشموع الحمراء...")
+        print("🔍 فلترة العملات حسب عدد الشموع الحمراء المتتالية من النهاية...")
         tickers = BITVAVO.ticker24h({})
         if isinstance(tickers, str):
             tickers = json.loads(tickers)
 
-        symbols = []
+        ranked = []
         for t in tickers:
             market = t.get("market", "")
             if not market.endswith("-EUR"):
                 continue
 
             candles = get_candles(market)
-            if len(candles) < 6:
+            if len(candles) < 3:
                 continue
 
-            last_6 = candles[-6:]
-            reds = [c for c in last_6 if float(c[4]) < float(c[1])]
-            if len(reds) == 0:
-                continue
+            # نحسب عدد الشموع الحمراء من النهاية للخلف
+            red_count = 0
+            for c in reversed(candles):
+                open_, close = float(c[1]), float(c[4])
+                if close < open_:
+                    red_count += 1
+                else:
+                    break  # توقف عند أول شمعة غير حمراء
 
-            volume_sum = sum(float(c[5]) for c in last_6)
-            symbols.append((market, len(reds), volume_sum))
+            if red_count > 0:
+                ranked.append((market, red_count))
 
-        top = sorted(symbols, key=lambda x: (x[1], x[2]), reverse=True)[:30]
+        # ترتيب تنازلي حسب عدد الشموع الحمراء
+        top = sorted(ranked, key=lambda x: x[1], reverse=True)[:30]
         selected = [s[0] for s in top]
         print("✅ العملات المختارة:", selected)
         return selected
