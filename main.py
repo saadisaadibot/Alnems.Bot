@@ -5,12 +5,15 @@ import requests
 
 # 🟢 إعداد البيئة
 app = Flask(__name__)
-BITVAVO = Bitvavo({
+options = {
     'APIKEY': os.getenv("BITVAVO_API_KEY"),
     'APISECRET': os.getenv("BITVAVO_API_SECRET"),
     'RESTURL': 'https://api.bitvavo.com/v2',
-    'WSURL': 'wss://ws.bitvavo.com/v2/'
-})
+    'WSURL': 'wss://ws.bitvavo.com/v2/',
+    'WS': True  # ✅ تفعيل WebSocket
+}
+BITVAVO = Bitvavo(options)
+
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 CHAT_ID = os.getenv("CHAT_ID")
 BUY_AMOUNT = float(os.getenv("BUY_AMOUNT_EUR", 10))
@@ -27,7 +30,8 @@ def send_message(text):
         requests.post(f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage", data={
             "chat_id": CHAT_ID, "text": text
         })
-    except: pass
+    except:
+        pass
 
 # 📦 بيع وشراء
 def buy(symbol):
@@ -74,6 +78,7 @@ def watch_symbols():
             except Exception as e:
                 print("❌ تحليل:", e)
 
+        # ✅ الاشتراك في WebSocket
         BITVAVO.subscribeTicker(symbol, callback)
 
     markets = BITVAVO.markets()
@@ -109,7 +114,7 @@ def track_sell(symbol):
     except Exception as e:
         print("⚠️ تتبع البيع:", e)
 
-# 🧠 الأوامر
+# 🧠 أوامر تيليغرام
 @app.route("/webhook", methods=["POST"])
 def webhook():
     global is_running
@@ -138,7 +143,7 @@ def webhook():
             send_message(msg)
     return "", 200
 
-# 🚀 بدء
+# 🚀 بدء التنفيذ
 if __name__ == "__main__":
     send_message("🐾 النمس بدأ - الشمعة المتأرجحة™")
     threading.Thread(target=watch_symbols).start()
