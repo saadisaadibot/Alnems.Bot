@@ -25,7 +25,6 @@ BITVAVO = Bitvavo({
     'WSURL': 'wss://ws.bitvavo.com/v2/'
 })
 
-# إعدادات عامة
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 CHAT_ID = os.getenv("CHAT_ID")
 BUY_AMOUNT = 10
@@ -40,7 +39,6 @@ def send_message(text):
     except:
         pass
 
-# ✅ السعر الحالي
 def get_price(symbol):
     try:
         res = BITVAVO.tickerPrice(symbol)
@@ -50,50 +48,52 @@ def get_price(symbol):
     except:
         return None
 
-# ✅ شموع 1m
-def get_candles(symbol, limit=10):
+def get_candles(symbol):
     try:
-        res = BITVAVO.candles(symbol, {'interval': '1m', 'limit': limit})
+        res = BITVAVO.candles(symbol, {'interval': '1m', 'limit': 6})
         if isinstance(res, str):
             res = json.loads(res)
         return res
     except:
         return []
 
-# ✅ تحليل ومراقبة الشراء
 def analyze(symbol):
     try:
-        candles = get_candles(symbol, 6)
+        candles = get_candles(symbol)
         if len(candles) < 6:
             return
 
-        last_6 = candles[-6:]
-        reds = [float(c[4]) < float(c[1]) for c in last_6]
-        green = float(last_6[-1][4]) > float(last_6[-1][1])
+        current_price = get_price(symbol)
+        if not current_price:
+            return
 
-        if sum(reds[:-1]) >= 5 and green:
-            open_, close = float(last_6[-1][1]), float(last_6[-1][4])
-            if ((close - open_) / open_) * 100 < 0.3:
-                return
+        # حساب عدد الشمعات الحمراء من آخر 5 شمعات (ماعدا الأخيرة)
+        reds = [c for c in candles[:-1] if float(c[4]) < float(c[1])]
+        if len(reds) < 4:
+            return
 
-            # ✅ تنفيذ الشراء
-            base = symbol.split("-")[0]
-            buy_price = get_price(symbol)
-            payload = {
-                "market": symbol,
-                "side": "buy",
-                "orderType": "market",
-                "amount": str(BUY_AMOUNT)
-            }
-            BITVAVO.placeOrder(payload)
-            send_message(f"✅ اشترينا {base} 🚀 بعد {sum(reds[:-1])} شمعات حمراء + خضراء")
+        # تحقق من أن الشمعة الأخيرة خضراء ومقبولة
+        last = candles[-1]
+        open_, close = float(last[1]), float(last[4])
+        if close <= open_:
+            return
+        if ((close - open_) / open_) * 100 < 0.2:
+            return
 
-            threading.Thread(target=watch_sell, args=(symbol, buy_price)).start()
+        base = symbol.split("-")[0]
+        BITVAVO.placeOrder({
+            "market": symbol,
+            "side": "buy",
+            "orderType": "market",
+            "amount": str(BUY_AMOUNT)
+        })
+        send_message(f"✅ اشترينا {base} بعد عدة حمر وشمعة خضراء")
+
+        threading.Thread(target=watch_sell, args=(symbol, current_price)).start()
 
     except Exception as e:
-        print(f"❌ analyze {symbol}:", e)
+        print(f"❌ تحليل {symbol}:", e)
 
-# ✅ مراقبة البيع
 def watch_sell(symbol, buy_price):
     try:
         while True:
@@ -103,67 +103,65 @@ def watch_sell(symbol, buy_price):
                 continue
 
             change = (current - buy_price) / buy_price * 100
-            if change >= 1 or change <= -0.5:
-                base = symbol.split("-")[0]
-                payload = {
-                    "market": symbol,
-                    "side": "sell",
-                    "orderType": "market",
-                    "amount": str(BUY_AMOUNT)
-                }
-                BITVAVO.placeOrder(payload)
-                send_message(f"🚪 بيعنا {base} (النمس 🐆) - تغيير: {round(change, 2)}%")
-                break
-    except Exception as e:
-        print(f"❌ sell {symbol}:", e)
 
-# ✅ جلب العملات التي تحقق شرط 5 حمر + خضراء
-def get_top_30_red_green():
+            if change >= 1 or change <= -0.5:
+                break
+
+        base = symbol.split("-")[0]
+        BITVAVO.placeOrder({
+            "market": symbol,
+            "side": "sell",
+            "orderType": "market",
+            "amount": str(BUY_AMOUNT)
+        })
+        send_message(f"🚪 بيعنا {base} - التغيير: {round(change, 2)}%")
+    except Exception as e:
+        print(f"❌ بيع {symbol}:", e)
+
+def get_top_30():
     try:
-        print("🔍 فحص الشموع...")
+        print("🔍 اختيار العملات حسب الشموع...")
         tickers = BITVAVO.ticker24h({})
         if isinstance(tickers, str):
             tickers = json.loads(tickers)
 
-        candidates = []
+        selected = []
         for t in tickers:
-            symbol = t.get("market", "")
-            if not symbol.endswith("-EUR"):
+            market = t.get("market", "")
+            if not market.endswith("-EUR"):
                 continue
 
-            candles = get_candles(symbol, 10)
+            candles = get_candles(market)
             if len(candles) < 6:
                 continue
 
-            last_6 = candles[-6:]
-            reds = [float(c[4]) < float(c[1]) for c in last_6]
-            green = float(last_6[-1][4]) > float(last_6[-1][1])
+            reds = [c for c in candles[:-1] if float(c[4]) < float(c[1])]
+            if len(reds) < 4:
+                continue
 
-            if sum(reds[:-1]) >= 5 and green:
-                candidates.append((symbol, sum(reds[:-1])))
+            last = candles[-1]
+            open_, close = float(last[1]), float(last[4])
+            if close > open_:
+                selected.append(market)
 
-        sorted_top = sorted(candidates, key=lambda x: x[1], reverse=True)[:30]
-        final = [s[0] for s in sorted_top]
-        print("✅ العملات المختارة:", final)
-        return final
+        print("✅ العملات المختارة:", selected[:30])
+        return selected[:30]
     except Exception as e:
-        print("🔴 خطأ في get_top_30_red_green:", e)
+        print("❌ خطأ في get_top_30:", e)
         return []
 
-# ✅ حلقة التحديث كل 5 دقائق
-def update_watchlist():
+def run_bot():
     while True:
         try:
-            print("🔁 تحديث قائمة المراقبة...")
+            print("📥 تحديث قائمة المراقبة...")
             r.delete(WATCHLIST_KEY)
-            symbols = get_top_30_red_green()
-            for s in symbols:
-                r.sadd(WATCHLIST_KEY, s)
+            top = get_top_30()
+            for symbol in top:
+                r.sadd(WATCHLIST_KEY, symbol)
             time.sleep(300)  # كل 5 دقائق
         except Exception as e:
-            print("❌ تحديث القائمة:", e)
+            print("❌ خطأ في تحديث القائمة:", e)
 
-# ✅ المراقبة اللحظية
 def monitor_loop():
     while True:
         try:
@@ -172,9 +170,8 @@ def monitor_loop():
                 threading.Thread(target=analyze, args=(symbol,)).start()
                 time.sleep(3)
         except Exception as e:
-            print("❌ المراقبة:", e)
+            print("❌ خطأ في المراقبة:", e)
 
-# ✅ أمر "شو عم تعمل"
 @app.route('/webhook', methods=['POST'])
 def webhook():
     msg = request.json.get("message", {}).get("text", "")
@@ -185,8 +182,7 @@ def webhook():
         send_message(msg)
     return "ok"
 
-# ✅ تشغيل البوت
 if __name__ == '__main__':
-    threading.Thread(target=update_watchlist).start()
+    threading.Thread(target=run_bot).start()
     threading.Thread(target=monitor_loop).start()
     app.run(host="0.0.0.0", port=int(os.getenv("PORT", 8080)))
