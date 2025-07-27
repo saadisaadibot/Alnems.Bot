@@ -59,7 +59,7 @@ def watch(symbol, entry_price, source):
         if not price:
             continue
         change = ((price - entry_price) / entry_price) * 100
-        if change >= 1.5 or change <= -0.5:
+        if change >= 1.5 or change <= -1:
             break
 
     amount = BUY_AMOUNT_EUR / entry_price
