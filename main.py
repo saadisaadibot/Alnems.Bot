@@ -17,6 +17,8 @@ REDIS_URL = os.getenv("REDIS_URL")
 BUY_AMOUNT_EUR = float(os.getenv("BUY_AMOUNT_EUR", 10))
 r = redis.from_url(REDIS_URL)
 
+r.flushdb()  # ✅ تنظيف بيانات Redis عند التشغيل
+
 def send_message(text):
     try:
         requests.post(f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage", data={"chat_id": CHAT_ID, "text": text})
