@@ -20,8 +20,9 @@ BITVAVO = Bitvavo({
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 CHAT_ID = os.getenv("CHAT_ID")
 BUY_AMOUNT = 10
-IS_RUNNING_KEY = "scalper:running"
 IS_IN_TRADE = "scalper:in_trade"
+BUY_ENABLED = "scalper:enabled"
+r.set(BUY_ENABLED, "true")
 
 def send_message(text):
     try:
@@ -52,134 +53,130 @@ def get_candles(symbol):
         return []
 
 def count_red_candles(candles):
-    count = 0
-    for c in reversed(candles):
-        if float(c[4]) < float(c[1]):
-            count += 1
-    return count
+    return sum(1 for c in candles if float(c[4]) < float(c[1]))
 
-def get_top_symbol():
-    try:
-        tickers = BITVAVO.ticker24h({})
-        if isinstance(tickers, str):
-            tickers = json.loads(tickers)
+def select_best_symbol():
+    tickers = BITVAVO.ticker24h({})
+    if isinstance(tickers, str):
+        tickers = json.loads(tickers)
 
-        candidates = []
-        for t in tickers:
-            symbol = t.get("market", "")
-            if not symbol.endswith("-EUR"):
-                continue
-            candles = get_candles(symbol)
-            if len(candles) < 3:
-                continue
-            red_count = count_red_candles(candles)
-            if red_count > 0:
-                candidates.append((symbol, red_count))
+    scores = []
+    for t in tickers:
+        symbol = t.get("market", "")
+        if not symbol.endswith("-EUR"):
+            continue
+        candles = get_candles(symbol)
+        if len(candles) < 5:
+            continue
+        red_count = count_red_candles(candles)
+        total_drop = ((float(candles[0][1]) - float(candles[-1][4])) / float(candles[0][1])) * 100
+        volume = float(t.get("volume", 0))
+        score = red_count * 10 + total_drop + volume
+        scores.append((symbol, score))
 
-        top = sorted(candidates, key=lambda x: x[1], reverse=True)
-        if top:
-            return top[0][0]
-        return None
-    except:
-        return None
+    top = sorted(scores, key=lambda x: x[1], reverse=True)
+    return top[0][0] if top else None
 
 def buy(symbol):
     try:
+        if not r.get(BUY_ENABLED) or r.get(IS_IN_TRADE):
+            return
+        price = get_price(symbol)
+        if not price:
+            return
+
         order = {
-            "amount": str(BUY_AMOUNT),
             "market": symbol,
             "side": "buy",
             "orderType": "market",
+            "amount": str(BUY_AMOUNT),
             "operatorId": ""
         }
-        result = BITVAVO._Bitvavo__request("POST", "/order", order)
-        if "error" not in result:
-            r.set(IS_IN_TRADE, symbol)
-            send_message(f"✅ اشترينا {symbol.split('-')[0]} مباشرة بعد {symbol} (النمس 🐆)")
-            threading.Thread(target=watch_sell, args=(symbol, get_price(symbol))).start()
-        else:
-            send_message(f"❌ فشل في الشراء: {result['error']['message']}")
+        result = BITVAVO.placeOrder(order)
+        if "error" in result:
+            send_message(f"❌ فشل الشراء: {result['error']['message']}")
+            return
+
+        r.set(IS_IN_TRADE, symbol)
+        r.set("entry_price", price)
+        r.set("entry_symbol", symbol)
+        send_message(f"✅ اشترينا {symbol.split('-')[0]} مباشرة بعد {symbol} (النمس 🐆)")
+        threading.Thread(target=watch_sell, args=(symbol, price)).start()
     except Exception as e:
         send_message(f"❌ استثناء في الشراء: {e}")
 
-def watch_sell(symbol, buy_price):
+def watch_sell(symbol, entry_price):
     try:
         while True:
             time.sleep(0.5)
             current = get_price(symbol)
             if not current:
                 continue
-            change = (current - buy_price) / buy_price * 100
+            change = (current - entry_price) / entry_price * 100
             if change >= 1.5 or change <= -0.5:
                 break
 
         order = {
-            "amount": str(BUY_AMOUNT),
             "market": symbol,
             "side": "sell",
             "orderType": "market",
+            "amount": str(BUY_AMOUNT),
             "operatorId": ""
         }
-        result = BITVAVO._Bitvavo__request("POST", "/order", order)
+        result = BITVAVO.placeOrder(order)
         r.delete(IS_IN_TRADE)
-        profit = round((get_price(symbol) - buy_price) * BUY_AMOUNT, 2)
-        percent = round((get_price(symbol) - buy_price) / buy_price * 100, 2)
-        send_message(f"🚪 بيعنا {symbol.split('-')[0]} - النسبة: {percent}% - الربح: €{profit}")
-        r.rpush("scalper:profits", json.dumps({
-            "symbol": symbol,
-            "entry": buy_price,
-            "exit": get_price(symbol),
-            "profit": profit,
-            "percent": percent
-        }))
-        # بعد البيع نبدأ دورة جديدة
-        threading.Thread(target=main_loop).start()
+        if "error" not in result:
+            send_message(f"✅ بيع {symbol} بنسبة {round(change, 2)}%")
+            store_profit(symbol, entry_price, current, change)
+        else:
+            send_message(f"❌ فشل البيع: {result['error']['message']}")
     except Exception as e:
+        send_message(f"❌ استثناء في البيع: {e}")
         r.delete(IS_IN_TRADE)
-        send_message(f"❌ فشل في البيع: {e}")
+    finally:
+        start_cycle()
 
-def main_loop():
-    if r.get(IS_RUNNING_KEY) != b"on":
-        return
-    if r.get(IS_IN_TRADE):
-        return
+def store_profit(symbol, entry, exit, percent):
+    profits = {
+        "entry": entry,
+        "exit": exit,
+        "percent": percent
+    }
+    r.rpush("scalper:profits", json.dumps(profits))
 
-    symbol = get_top_symbol()
-    if symbol:
-        buy(symbol)
-    else:
-        send_message("❌ لم يتم العثور على عملة مناسبة.")
-
-@app.route('/webhook', methods=['POST'])
+@app.route("/webhook", methods=["POST"])
 def webhook():
     msg = request.json.get("message", {}).get("text", "")
-    if not msg:
-        return "ok"
-
     if "stop" in msg:
-        r.set(IS_RUNNING_KEY, "off")
-        send_message("⛔️ تم إيقاف الشراء.")
+        r.set(BUY_ENABLED, "false")
+        send_message("🛑 تم إيقاف الشراء.")
     elif "play" in msg:
-        r.set(IS_RUNNING_KEY, "on")
-        send_message("✅ بدأ النمس - نسخة الأرجوحة السريعة!")
-        threading.Thread(target=main_loop).start()
+        r.set(BUY_ENABLED, "true")
+        send_message("▶️ تم تفعيل الشراء.")
+        start_cycle()
     elif "الملخص" in msg:
-        profits = r.lrange("scalper:profits", 0, -1)
-        if not profits:
-            send_message("لا يوجد صفقات بعد.")
+        entries = r.lrange("scalper:profits", 0, -1)
+        if not entries:
+            send_message("لا توجد صفقات.")
         else:
+            summary = "📊 ملخص الصفقات:\n"
             total = 0
-            text = "📊 ملخص الأرباح:\n"
-            for p in profits:
-                d = json.loads(p)
-                total += d["profit"]
-                text += f"{d['symbol']}: {round(d['percent'],2)}% | €{round(d['profit'],2)}\n"
-            text += f"\n✅ الإجمالي: €{round(total, 2)}"
-            send_message(text)
+            for e in entries:
+                d = json.loads(e)
+                summary += f"ربح: {round(d['percent'],2)}%\n"
+                total += d['percent']
+            summary += f"\n📈 الربح الكلي: {round(total, 2)}%"
+            send_message(summary)
     return "ok"
 
-if __name__ == '__main__':
-    r.set(IS_RUNNING_KEY, "off")
-    r.delete(IS_IN_TRADE)
+def start_cycle():
+    if not r.get(BUY_ENABLED):
+        return
+    symbol = select_best_symbol()
+    if symbol:
+        buy(symbol)
+
+if __name__ == "__main__":
     send_message("🐾 النمس بدأ - نسخة الأرجوحة السريعة!")
+    threading.Thread(target=start_cycle).start()
     app.run(host="0.0.0.0", port=int(os.getenv("PORT", 8080)))
