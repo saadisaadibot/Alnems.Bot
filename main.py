@@ -33,13 +33,17 @@ def headers(t, method, path, body):
         "Content-Type": "application/json"
     }
 
-# 🌐 طلب API
+# 🌐 طلب API مع تصحيح التعامل مع الرد
 def bitvavo_request(method, path, body=None):
     t = str(int(time.time() * 1000))
     body_str = json.dumps(body) if body else ""
     h = headers(t, method, path, body_str)
     r = requests.request(method, bitvavo_url + path, headers=h, data=body_str)
-    return r.json()
+    try:
+        return r.json()
+    except Exception:
+        print("⚠️ رد غير قابل للقراءة:", r.text)
+        return {}
 
 # 📨 تيليغرام
 def send_message(text):
@@ -80,10 +84,9 @@ def analyze_and_buy():
             time.sleep(1)
             continue
         try:
-            # 🏆 اختيار Top 30 عملة حسب الحجم
             markets = get_markets()
             top_symbols = sorted(
-                [m for m in markets if m.get("quote") == "EUR"],
+                [m for m in markets if isinstance(m, dict) and m.get("quote") == "EUR"],
                 key=lambda x: float(x.get("volume", 0)),
                 reverse=True
             )[:30]
@@ -91,7 +94,7 @@ def analyze_and_buy():
             for market in top_symbols:
                 symbol = market["market"]
                 candles = get_candles(symbol)
-                if len(candles) < 20:
+                if not isinstance(candles, list) or len(candles) < 20:
                     continue
 
                 closes = [float(c[4]) for c in candles]
@@ -103,7 +106,8 @@ def analyze_and_buy():
 
                 if current <= lower * 1.01:
                     res = buy_order(symbol)
-                    price = float(res.get("fills", [{}])[0].get("price", 0))
+                    fills = res.get("fills", [{}])
+                    price = float(fills[0].get("price", 0)) if fills else 0
                     if price > 0:
                         symbol_in_position = symbol
                         entry_price = price
@@ -126,7 +130,8 @@ def monitor_position_bollinger(upper_band):
 
             if price >= upper_band or profit >= 1 or profit <= -0.5:
                 coin = symbol_in_position.split("-")[0]
-                amount = float(bitvavo_request("GET", f"/balance/{coin}")["available"])
+                bal = bitvavo_request("GET", f"/balance/{coin}")
+                amount = float(bal.get("available", 0))
                 sell_order(symbol_in_position, amount)
                 send_message(f"{'💰' if profit > 0 else '⚠️'} النمس باع {symbol_in_position} بربح {round(profit,2)}%")
                 profits.append(round(profit, 2))
