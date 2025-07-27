@@ -171,7 +171,7 @@ def run_bot():
             print("🔴 حلقة النمس:", e)
 
 # ✅ أمر "شو عم تعمل"
-@app.route('/', methods=['POST'])
+@app.route('/webhook', methods=['POST'])
 def webhook():
     msg = request.json.get("message", {}).get("text", "")
     if "شو عم تعمل" in msg:
