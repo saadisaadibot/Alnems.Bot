@@ -14,8 +14,11 @@ r = redis.from_url(os.getenv("REDIS_URL"))
 key = os.getenv("SCALPER_API_KEY")
 secret = os.getenv("SCALPER_API_SECRET")
 
+key = os.getenv("BITVAVO_API_KEY")
+secret = os.getenv("BITVAVO_API_SECRET")
+
 if not key or not secret:
-    print("❌ تأكد من وجود SCALPER_API_KEY و SCALPER_API_SECRET في إعدادات Railway")
+    print("❌ تأكد من وجود BITVAVO_API_KEY و BITVAVO_API_SECRET في إعدادات Railway")
     exit()
 
 BITVAVO = Bitvavo({
