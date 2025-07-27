@@ -23,7 +23,6 @@ BUY_AMOUNT = 10
 WATCHLIST_KEY = "scalper:watchlist"
 IS_IN_TRADE = "scalper:in_trade"
 
-# إرسال رسالة تيليغرام
 def send_message(text):
     try:
         requests.post(f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage", data={
@@ -33,7 +32,6 @@ def send_message(text):
     except:
         pass
 
-# جلب السعر الحالي
 def get_price(symbol):
     try:
         res = BITVAVO.tickerPrice(symbol)
@@ -43,21 +41,18 @@ def get_price(symbol):
     except:
         return None
 
-# جلب شموع العملة
 def get_candles(symbol):
     try:
-        res = BITVAVO.candles(symbol, {'interval': '1m', 'limit': 6})
-        if isinstance(res, str):
-            res = json.loads(res)
-        if not isinstance(res, list):
-            print(f"🔴 شموع غير صالحة لـ {symbol}: {res}")
+        url = f"https://api.bitvavo.com/v2/{symbol}/candles?interval=1m&limit=10"
+        res = requests.get(url)
+        if res.status_code != 200:
+            print(f"🔴 شموع غير صالحة لـ {symbol}: {res.text}")
             return []
-        return res
+        return res.json()
     except Exception as e:
         print(f"❌ فشل جلب الشموع لـ {symbol}:", e)
         return []
 
-# عد الشموع الحمراء المتتالية من النهاية
 def count_red_candles_from_end(candles):
     count = 0
     for c in reversed(candles):
@@ -67,9 +62,8 @@ def count_red_candles_from_end(candles):
             break
     return count
 
-# تحديد أفضل 30 عملة بها شموع حمراء متتالية
 def get_top_30():
-    print("🔎 تحديد العملات ذات أكبر عدد شموع حمراء متتالية...")
+    print("🔎 فلترة العملات حسب الشموع الحمراء المتتالية من النهاية...")
     try:
         tickers = BITVAVO.ticker24h({})
         if isinstance(tickers, str):
@@ -98,23 +92,20 @@ def get_top_30():
         print("❌ خطأ في get_top_30:", e)
         return []
 
-# تحليل العملة والشراء إذا تحقق الشرط
 def analyze(symbol):
     try:
         if r.get(IS_IN_TRADE):
             return
 
         candles = get_candles(symbol)
-        if len(candles) < 2:
+        if len(candles) < 6:
             return
 
         last = candles[-1]
         open_, close = float(last[1]), float(last[4])
-        change = (close - open_) / open_ * 100
-        if close <= open_ or change < 0.3:
+        if close <= open_ or ((close - open_) / open_) * 100 < 0.3:
             return
 
-        # تنفيذ شراء
         base = symbol.split("-")[0]
         payload = {
             "market": symbol,
@@ -124,13 +115,12 @@ def analyze(symbol):
         }
         BITVAVO.placeOrder(payload)
         r.set(IS_IN_TRADE, symbol, ex=300)
-        send_message(f"✅ اشترينا {base} بعد ارتفاع +{round(change, 2)}% (النمس 🐆)")
+        send_message(f"✅ اشترينا {base} بعد {symbol} (النمس 🐆)")
         threading.Thread(target=watch_sell, args=(symbol, get_price(symbol))).start()
 
     except Exception as e:
         print(f"❌ analyze {symbol}:", e)
 
-# مراقبة السعر للبيع عند +1% أو -0.5%
 def watch_sell(symbol, buy_price):
     try:
         while True:
@@ -151,12 +141,11 @@ def watch_sell(symbol, buy_price):
         })
         r.delete(IS_IN_TRADE)
         base = symbol.split("-")[0]
-        send_message(f"🚪 بيعنا {base} - الربح: {round(change, 2)}%")
+        send_message(f"🚪 بيعنا {base} - النسبة: {round(change, 2)}%")
     except Exception as e:
         print("❌ watch_sell:", e)
         r.delete(IS_IN_TRADE)
 
-# عرض العملات تحت المراقبة عند الطلب
 @app.route('/webhook', methods=['POST'])
 def webhook():
     msg = request.json.get("message", {}).get("text", "")
@@ -166,7 +155,6 @@ def webhook():
         send_message(text if coins else "لا يوجد حالياً")
     return "ok"
 
-# تحديث قائمة العملات كل 5 دقائق
 def update_watchlist():
     while True:
         try:
@@ -178,7 +166,6 @@ def update_watchlist():
         except Exception as e:
             print("❌ update_watchlist:", e)
 
-# تحليل العملات كل 3 ثواني
 def monitor_loop():
     while True:
         try:
@@ -188,7 +175,6 @@ def monitor_loop():
         except Exception as e:
             print("❌ monitor_loop:", e)
 
-# التشغيل
 if __name__ == '__main__':
     threading.Thread(target=update_watchlist).start()
     threading.Thread(target=monitor_loop).start()
