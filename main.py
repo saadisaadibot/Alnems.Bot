@@ -84,6 +84,7 @@ def place_market_buy(symbol):
     try:
         price = get_price(symbol)
         if not price:
+            send_message(f"❌ لم نتمكن من جلب سعر {symbol}")
             return False
 
         amount = round(BUY_AMOUNT / price, 4)
@@ -93,7 +94,12 @@ def place_market_buy(symbol):
             "orderType": "market",
             "amount": str(amount)
         }
+
         result = BITVAVO.placeOrder(payload)
+        if isinstance(result, str):
+            result = json.loads(result)
+        send_message(f"📦 رد بيتفافو: {result}")
+
         if "orderId" in result:
             r.set(TRADE_LOCK, symbol, ex=600)
             r.hset("entry", symbol, price)
@@ -104,6 +110,7 @@ def place_market_buy(symbol):
         else:
             send_message(f"❌ فشل في الشراء: {result}")
             return False
+
     except Exception as e:
         send_message(f"❌ استثناء في الشراء: {e}")
         return False
@@ -145,12 +152,17 @@ def watch_trade(symbol, entry_price):
 def start_cycle():
     try:
         if r.get(TRADE_LOCK):
+            send_message("⚠️ دورة ملغية: صفقة جارية.")
             return
         if r.get(IS_RUNNING_KEY) != b"on":
+            send_message("⚠️ دورة ملغية: النمس متوقف.")
             return
         symbol = select_best_symbol()
         if symbol:
+            send_message(f"🎯 تم اختيار {symbol} كأفضل عملة.")
             place_market_buy(symbol)
+        else:
+            send_message("🚫 لم يتم العثور على عملة مناسبة.")
     except Exception as e:
         send_message(f"❌ start_cycle error: {e}")
 
