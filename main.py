@@ -101,6 +101,7 @@ def execute_buy(symbol, source):
 
 # ========== Webhook رئيسي ==========
 @app.route("/", methods=["POST"])
+@app.route("/webhook", methods=["POST"])
 def webhook():
     data = request.json
     msg = data.get("message", {}).get("text", "").lower()
