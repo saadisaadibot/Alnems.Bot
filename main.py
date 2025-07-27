@@ -53,18 +53,17 @@ def watch_symbols():
     def analyze(symbol):
         global symbol_in_position, entry_price
 
-        def callback(msg):
-            nonlocal symbol
-            if not is_running or symbol_in_position:
-                return
-
+        while is_running and not symbol_in_position:
             try:
-                price = float(msg['price'])
+                price_data = BITVAVO.tickerPrice(symbol)
+                price = float(price_data.get("price", 0))
                 candles = BITVAVO.candles(symbol, {'interval': '1m', 'limit': 3})
-                if len(candles) < 3: return
+                if len(candles) < 3:
+                    time.sleep(1)
+                    continue
+
                 c1, c2, c3 = [float(c[4]) for c in candles[-3:]]
 
-                # استراتيجية الشمعة المتأرجحة:
                 if c3 > c2 and c2 < c1 and price <= c2 * 1.01:
                     res = buy(symbol)
                     filled_price = float(res.get("fills", [{}])[0].get("price", 0))
@@ -73,14 +72,11 @@ def watch_symbols():
                         entry_price = filled_price
                         send_message(f"✅ النمس دخل {symbol} بسعر {filled_price} EUR")
                         threading.Thread(target=track_sell, args=(symbol,)).start()
+                        break
             except Exception as e:
                 print("❌ تحليل:", e)
 
-        try:
-            monitored_symbols.append(symbol)
-            BITVAVO.websocket.ticker(symbol, callback)
-        except Exception as e:
-            print(f"❌ WebSocket فشل {symbol}:", e)
+            time.sleep(1)  # كل ثانية
 
     markets = BITVAVO.markets()
     top = sorted(
