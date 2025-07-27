@@ -165,7 +165,7 @@ def get_top_30():
 
             # حساب مجموع حجم التداول في آخر 5 شمعات
             volume_sum = sum(float(c[5]) for c in last_6[:-1])
-            if volume_sum < 5000:
+            if volume_sum < 3000:
                 continue
 
             symbols.append((market, volume_sum))
