@@ -17,7 +17,7 @@ REDIS_URL = os.getenv("REDIS_URL")
 BUY_AMOUNT_EUR = float(os.getenv("BUY_AMOUNT_EUR", 10))
 r = redis.from_url(REDIS_URL)
 
-r.flushdb()
+r.flushdb()  # تنظيف البيانات عند التشغيل
 
 # ========== أدوات أساسية ==========
 def send_message(text):
@@ -127,7 +127,7 @@ def execute_buy(symbol, source):
     else:
         send_message(f"❌ فشل في الشراء: {result}")
 
-# ========== التفاعل مع Telegram ==========
+# ========== Webhook: من Telegram ==========
 @app.route("/webhook", methods=["POST"])
 def webhook():
     data = request.get_json()
@@ -135,15 +135,20 @@ def webhook():
     if not msg:
         return "", 200
 
-    # أمر الشراء (كوكو أو يدوي)
     if msg.startswith("اشتري") and "يا نمس" in msg:
         coin = msg.split()[1].upper()
         symbol = coin + "-EUR"
-        source = "كوكو" if "كوكو" in msg else "يدوي"
+
+        if "ridder" in msg:
+            source = "كوكو_Ridder"
+        elif "sniper" in msg or "جدار" in msg:
+            source = "كوكو_Sniper"
+        else:
+            source = "يدوي"
+
         execute_buy(symbol, source)
         return "", 200
 
-    # أمر الملخص
     if "الملخص" in msg:
         data = r.hgetall("profits")
         if not data:
@@ -152,7 +157,12 @@ def webhook():
 
         total = 0
         count = 0
-        sources = {"كوكو": {"sum": 0, "count": 0}, "يدوي": {"sum": 0, "count": 0}}
+        sources = {
+            "كوكو_Ridder": {"sum": 0, "count": 0},
+            "كوكو_Sniper": {"sum": 0, "count": 0},
+            "يدوي": {"sum": 0, "count": 0}
+        }
+
         summary = "📊 ملخص الأرباح:\n"
         for k, v in data.items():
             k = k.decode()
@@ -160,6 +170,7 @@ def webhook():
             total += v["profit"]
             count += 1
             src = v.get("source", "يدوي")
+            sources.setdefault(src, {"sum": 0, "count": 0})
             sources[src]["sum"] += v["profit"]
             sources[src]["count"] += 1
             summary += f"{k}: {v['profit']} EUR ({v['percent']}%) - {src}\n"
@@ -172,6 +183,28 @@ def webhook():
 
     return "", 200
 
+# ========== Webhook إضافي: استقبال مباشر من كوكو ==========
+@app.route("/external", methods=["POST"])
+def external_webhook():
+    data = request.get_json()
+    text = data.get("text", "").lower()
+    if not text.startswith("اشتري") or "يا نمس" not in text:
+        return "", 200
+
+    coin = text.split()[1].upper()
+    symbol = coin + "-EUR"
+
+    if "ridder" in text:
+        source = "كوكو_Ridder"
+    elif "sniper" in text or "جدار" in text:
+        source = "كوكو_Sniper"
+    else:
+        source = "كوكو_غير_معروف"
+
+    execute_buy(symbol, source)
+    return "", 200
+
+# ========== واجهة التشغيل ==========
 @app.route("/")
 def home():
     return "النمس 🐆 يعمل!", 200
