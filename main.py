@@ -18,7 +18,7 @@ if not key or not secret:
     print("❌ تأكد من وجود BITVAVO_API_KEY و BITVAVO_API_SECRET في إعدادات Railway")
     exit()
 
-# ✅ إنشاء الكائن
+# ✅ إنشاء كائن Bitvavo
 BITVAVO = Bitvavo({
     'APIKEY': key,
     'APISECRET': secret,
@@ -26,25 +26,26 @@ BITVAVO = Bitvavo({
     'WSURL': 'wss://ws.bitvavo.com/v2/'
 })
 
-# إعدادات عامة
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 CHAT_ID = os.getenv("CHAT_ID")
-BUY_AMOUNT = 10  # باليورو
+BUY_AMOUNT = 10
 WATCHLIST_KEY = "scalper:watchlist"
 
-# ✅ إرسال رسالة تيليغرام
+# ✅ تيليغرام
 def send_message(text):
     try:
+        print("📤 إرسال تيليغرام:", text)
         requests.post(f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage", data={
             "chat_id": CHAT_ID,
             "text": text
         })
-    except:
-        pass
+    except Exception as e:
+        print("❌ تيليغرام:", e)
 
-# ✅ جلب Top 30 من Bitvavo
+# ✅ جلب Top 30
 def get_top_30():
     try:
+        print("🔄 جلب البيانات من Bitvavo...")
         tickers = BITVAVO.ticker24h({})
         if isinstance(tickers, str):
             tickers = json.loads(tickers)
@@ -55,7 +56,9 @@ def get_top_30():
                 filtered.append(t)
 
         top = sorted(filtered, key=lambda x: float(x["priceChangePercentage"]), reverse=True)
-        return [t["market"] for t in top[:30]]
+        top_symbols = [t["market"] for t in top[:30]]
+        print(f"✅ العملات المختارة: {top_symbols}")
+        return top_symbols
 
     except Exception as e:
         print("🔴 خطأ جلب العملات:", e)
@@ -68,44 +71,51 @@ def get_price(symbol):
         if isinstance(res, str):
             res = json.loads(res)
         return float(res['price'])
-    except:
+    except Exception as e:
+        print(f"🔴 خطأ السعر {symbol}:", e)
         return None
 
-# ✅ شموع 1m
+# ✅ شموع
 def get_candles(symbol):
     try:
         res = BITVAVO.candles(symbol, {'interval': '1m', 'limit': 3})
         if isinstance(res, str):
             res = json.loads(res)
         return res
-    except:
+    except Exception as e:
+        print(f"🔴 خطأ الشموع {symbol}:", e)
         return []
 
-# ✅ التحليل والشراء
+# ✅ تحليل وشراء
 def analyze(symbol):
     try:
+        print(f"🔍 تحليل {symbol}...")
         candles = get_candles(symbol)
         if len(candles) < 3:
+            print(f"⛔ أقل من 3 شموع: {symbol}")
             return
 
         latest = candles[-1]
         open_, high, low, close = map(float, latest[1:5])
-
         current_price = get_price(symbol)
         if not current_price:
+            print(f"⛔ لم نستطع جلب سعر {symbol}")
             return
 
         lower = min(float(c[3]) for c in candles)
         if current_price > lower * 1.02:
+            print(f"⛔ السعر مرتفع جداً {symbol}")
             return
 
         if close <= open_:
+            print(f"⛔ الشمعة ليست خضراء {symbol}")
             return
 
         if ((close - open_) / open_) * 100 < 0.3:
+            print(f"⛔ شمعة ضعيفة {symbol}")
             return
 
-        # ✅ تنفيذ الشراء
+        # ✅ شراء
         base = symbol.split("-")[0]
         payload = {
             "market": symbol,
@@ -116,7 +126,6 @@ def analyze(symbol):
         BITVAVO.placeOrder(payload)
         send_message(f"✅ اشترينا {base} 🧠 (النمس)")
 
-        # ✅ تابع للمراقبة
         threading.Thread(target=watch_sell, args=(symbol, current_price)).start()
 
     except Exception as e:
@@ -157,6 +166,7 @@ def watch_sell(symbol, buy_price):
 def run_bot():
     while True:
         try:
+            print("🔁 تحديث قائمة المراقبة...")
             r.delete(WATCHLIST_KEY)
             top = get_top_30()
             for symbol in top:
@@ -170,18 +180,22 @@ def run_bot():
         except Exception as e:
             print("🔴 حلقة النمس:", e)
 
-# ✅ أمر "شو عم تعمل"
+# ✅ أمر تيليغرام
 @app.route('/webhook', methods=['POST'])
 def webhook():
-    msg = request.json.get("message", {}).get("text", "")
-    if "شو عم تعمل" in msg:
-        coins = r.smembers(WATCHLIST_KEY)
-        msg = "🕵️ العملات تحت المراقبة:\n"
-        msg += "\n".join([c.decode() for c in coins]) if coins else "لا شيء حالياً"
-        send_message(msg)
-    return "ok"
+    try:
+        msg = request.json.get("message", {}).get("text", "")
+        if "شو عم تعمل" in msg:
+            coins = r.smembers(WATCHLIST_KEY)
+            msg = "🕵️ العملات تحت المراقبة:\n"
+            msg += "\n".join([c.decode() for c in coins]) if coins else "لا شيء حالياً"
+            send_message(msg)
+        return "ok"
+    except Exception as e:
+        print("❌ Webhook:", e)
+        return "error"
 
-# ✅ تشغيل السيرفر
+# ✅ تشغيل
 if __name__ == '__main__':
     threading.Thread(target=run_bot).start()
     app.run(host="0.0.0.0", port=int(os.getenv("PORT", 8080)))
