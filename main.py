@@ -140,29 +140,41 @@ def watch_sell(symbol, buy_price):
         print(f"❌ بيع {symbol}:", e)
 
 # ✅ جلب Top 30 عملة حسب حجم التداول
+# ✅ جلب Top 30 عملة تحتوي على 5 شمعات حمراء وتداول جيد
 def get_top_30():
     try:
-        print("🔁 جلب البيانات من Bitvavo...")
+        print("🔍 فلترة العملات حسب 5 شمعات حمراء وتداول جيد...")
         tickers = BITVAVO.ticker24h({})
         if isinstance(tickers, str):
             tickers = json.loads(tickers)
 
-        filtered = []
+        symbols = []
         for t in tickers:
             market = t.get("market", "")
-            volume = t.get("volume")
-            if (
-                market.endswith("-EUR")
-                and volume is not None
-                and volume != ''
-                and float(volume) > 0
-            ):
-                filtered.append(t)
+            if not market.endswith("-EUR"):
+                continue
 
-        top = sorted(filtered, key=lambda x: float(x["volume"]), reverse=True)
-        symbols = [t["market"] for t in top[:30]]
-        print("✅ العملات المختارة:", symbols)
-        return symbols
+            candles = get_candles(market)
+            if len(candles) < 6:
+                continue
+
+            last_6 = candles[-6:]
+            last_5_red = all(float(c[4]) < float(c[1]) for c in last_6[:-1])
+            if not last_5_red:
+                continue
+
+            # حساب مجموع حجم التداول في آخر 5 شمعات
+            volume_sum = sum(float(c[5]) for c in last_6[:-1])
+            if volume_sum < 5000:
+                continue
+
+            symbols.append((market, volume_sum))
+
+        # ترتيب حسب الحجم واختيار أفضل 30
+        top = sorted(symbols, key=lambda x: x[1], reverse=True)[:30]
+        selected = [s[0] for s in top]
+        print("✅ العملات المختارة:", selected)
+        return selected
 
     except Exception as e:
         print("🔴 خطأ في get_top_30:", e)
