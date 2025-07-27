@@ -27,7 +27,8 @@ def send_message(text):
         requests.post(f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage", data={
             "chat_id": CHAT_ID, "text": text
         })
-    except: pass
+    except:
+        pass
 
 # 📦 بيع وشراء
 def buy(symbol):
@@ -62,7 +63,7 @@ def watch_symbols():
                 if len(candles) < 3: return
                 c1, c2, c3 = [float(c[4]) for c in candles[-3:]]
 
-                # استراتيجية الشمعة المتأرجحة المعدلة:
+                # استراتيجية الشمعة المتأرجحة
                 if c3 > c2 and c2 < c1 and price <= c2 * 1.01:
                     res = buy(symbol)
                     filled_price = float(res.get("fills", [{}])[0].get("price", 0))
@@ -74,23 +75,18 @@ def watch_symbols():
             except Exception as e:
                 print("❌ تحليل:", e)
 
-        # ✅ WebSocket الحقيقي
+        # ✅ WebSocket الصحيح
         try:
-            BITVAVO.websocket.ticker(symbol, callback)
+            BITVAVO.subscribeTicker(symbol, callback)
         except Exception as e:
             print(f"❌ WebSocket فشل {symbol}: {e}")
 
-    # 🥇 اختيار Top 30
-    try:
-        markets = BITVAVO.markets()
-        top = sorted(
-            [m for m in markets if m['quote'] == 'EUR'],
-            key=lambda x: float(x.get("volume", 0)),
-            reverse=True
-        )[:30]
-    except Exception as e:
-        print("❌ فشل جلب العملات:", e)
-        return
+    markets = BITVAVO.markets()
+    top = sorted(
+        [m for m in markets if m['quote'] == 'EUR'],
+        key=lambda x: float(x.get("volume", 0)),
+        reverse=True
+    )[:30]
 
     for m in top:
         threading.Thread(target=analyze, args=(m['market'],)).start()
