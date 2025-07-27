@@ -5,15 +5,12 @@ import requests
 
 # 🟢 إعداد البيئة
 app = Flask(__name__)
-options = {
+BITVAVO = Bitvavo({
     'APIKEY': os.getenv("BITVAVO_API_KEY"),
     'APISECRET': os.getenv("BITVAVO_API_SECRET"),
     'RESTURL': 'https://api.bitvavo.com/v2',
-    'WSURL': 'wss://ws.bitvavo.com/v2/',
-    'WS': True  # ✅ تفعيل WebSocket
-}
-BITVAVO = Bitvavo(options)
-
+    'WSURL': 'wss://ws.bitvavo.com/v2/'
+})
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 CHAT_ID = os.getenv("CHAT_ID")
 BUY_AMOUNT = float(os.getenv("BUY_AMOUNT_EUR", 10))
@@ -30,8 +27,7 @@ def send_message(text):
         requests.post(f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage", data={
             "chat_id": CHAT_ID, "text": text
         })
-    except:
-        pass
+    except: pass
 
 # 📦 بيع وشراء
 def buy(symbol):
@@ -50,7 +46,7 @@ def sell(symbol, amount):
         'amount': str(amount)
     })
 
-# 📊 شمعة متأرجحة
+# 📊 الشمعة المتأرجحة
 def watch_symbols():
     def analyze(symbol):
         global symbol_in_position, entry_price
@@ -66,7 +62,7 @@ def watch_symbols():
                 if len(candles) < 3: return
                 c1, c2, c3 = [float(c[4]) for c in candles[-3:]]
 
-                # استراتيجية الشمعة المتأرجحة:
+                # استراتيجية الشمعة المتأرجحة
                 if c3 > c2 and c2 < c1 and price <= c2 * 1.01:
                     res = buy(symbol)
                     filled_price = float(res.get("fills", [{}])[0].get("price", 0))
@@ -78,8 +74,8 @@ def watch_symbols():
             except Exception as e:
                 print("❌ تحليل:", e)
 
-        # ✅ الاشتراك في WebSocket
-        BITVAVO.subscribeTicker(symbol, callback)
+        # ✅ WebSocket الحقيقي
+        BITVAVO.websocket.ticker(symbol, callback)
 
     markets = BITVAVO.markets()
     top = sorted(
@@ -114,7 +110,7 @@ def track_sell(symbol):
     except Exception as e:
         print("⚠️ تتبع البيع:", e)
 
-# 🧠 أوامر تيليغرام
+# 🧠 الأوامر
 @app.route("/webhook", methods=["POST"])
 def webhook():
     global is_running
@@ -143,7 +139,7 @@ def webhook():
             send_message(msg)
     return "", 200
 
-# 🚀 بدء التنفيذ
+# 🚀 بدء
 if __name__ == "__main__":
     send_message("🐾 النمس بدأ - الشمعة المتأرجحة™")
     threading.Thread(target=watch_symbols).start()
