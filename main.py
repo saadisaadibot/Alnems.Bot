@@ -103,7 +103,7 @@ def analyze(symbol):
 
         last = candles[-1]
         open_, close = float(last[1]), float(last[4])
-        if close <= open_ or ((close - open_) / open_) * 100 < 0.3:
+        if close <= open_ or ((close - open_) / open_) * 100 < 0.2:
             return
 
         base = symbol.split("-")[0]
