@@ -3,34 +3,28 @@ from flask import Flask, request
 from bitvavo_client.bitvavo import Bitvavo
 import requests
 
-# 🟢 إعداد البيئة
 app = Flask(__name__)
 BITVAVO = Bitvavo({
     'APIKEY': os.getenv("BITVAVO_API_KEY"),
     'APISECRET': os.getenv("BITVAVO_API_SECRET"),
-    'RESTURL': 'https://api.bitvavo.com/v2',
-    'WSURL': 'wss://ws.bitvavo.com/v2/'
+    'RESTURL': 'https://api.bitvavo.com/v2'
 })
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 CHAT_ID = os.getenv("CHAT_ID")
 BUY_AMOUNT = float(os.getenv("BUY_AMOUNT_EUR", 10))
 
-# 🔁 الحالة
 is_running = True
 symbol_in_position = None
 entry_price = 0
 profits = []
 
-# 📨 تيليغرام
 def send_message(text):
     try:
         requests.post(f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage", data={
             "chat_id": CHAT_ID, "text": text
         })
-    except:
-        pass
+    except: pass
 
-# 📦 بيع وشراء
 def buy(symbol):
     return BITVAVO.placeOrder({
         'market': symbol,
@@ -47,23 +41,17 @@ def sell(symbol, amount):
         'amount': str(amount)
     })
 
-# 📊 الشمعة المتأرجحة
 def watch_symbols():
     def analyze(symbol):
         global symbol_in_position, entry_price
-
-        def callback(msg):
-            nonlocal symbol
-            if not is_running or symbol_in_position:
-                return
-
-            try:
-                price = float(msg['price'])
+        try:
+            while is_running and not symbol_in_position:
                 candles = BITVAVO.candles(symbol, {'interval': '1m', 'limit': 3})
                 if len(candles) < 3: return
                 c1, c2, c3 = [float(c[4]) for c in candles[-3:]]
 
-                # استراتيجية الشمعة المتأرجحة
+                price = float(BITVAVO.tickerPrice(symbol)["price"])
+
                 if c3 > c2 and c2 < c1 and price <= c2 * 1.01:
                     res = buy(symbol)
                     filled_price = float(res.get("fills", [{}])[0].get("price", 0))
@@ -72,12 +60,7 @@ def watch_symbols():
                         entry_price = filled_price
                         send_message(f"✅ النمس دخل {symbol} بسعر {filled_price} EUR")
                         threading.Thread(target=track_sell, args=(symbol,)).start()
-            except Exception as e:
-                print("❌ تحليل:", e)
-
-        # ✅ WebSocket الصحيح
-        try:
-            BITVAVO.subscribeTicker(symbol, callback)
+                time.sleep(1)
         except Exception as e:
             print(f"❌ WebSocket فشل {symbol}: {e}")
 
@@ -91,7 +74,6 @@ def watch_symbols():
     for m in top:
         threading.Thread(target=analyze, args=(m['market'],)).start()
 
-# 💰 تتبع البيع
 def track_sell(symbol):
     global symbol_in_position, entry_price
     try:
@@ -114,7 +96,6 @@ def track_sell(symbol):
     except Exception as e:
         print("⚠️ تتبع البيع:", e)
 
-# 🧠 الأوامر
 @app.route("/webhook", methods=["POST"])
 def webhook():
     global is_running
@@ -143,7 +124,6 @@ def webhook():
             send_message(msg)
     return "", 200
 
-# 🚀 بدء
 if __name__ == "__main__":
     send_message("🐾 النمس بدأ - الشمعة المتأرجحة™")
     threading.Thread(target=watch_symbols).start()
