@@ -65,9 +65,16 @@ def select_best_symbol():
         symbol = t.get("market", "")
         if not symbol.endswith("-EUR"):
             continue
+
+        # تحقق من السعر فوراً واستبعد إذا غير متاح
+        price = get_price(symbol)
+        if not price:
+            continue
+
         candles = get_candles(symbol)
         if len(candles) < 5:
             continue
+
         red_count = count_red_candles(candles)
         try:
             volume = float(t.get("volume", 0) or 0)
