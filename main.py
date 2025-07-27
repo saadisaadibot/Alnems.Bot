@@ -48,12 +48,15 @@ def get_top_30():
         tickers = BITVAVO.ticker24h({})
         if isinstance(tickers, str):
             tickers = json.loads(tickers)
-        top = sorted(
-            [t for t in tickers if t["market"].endswith("-EUR")],
-            key=lambda x: float(x["priceChangePercentage"]),
-            reverse=True
-        )
+
+        filtered = []
+        for t in tickers:
+            if t.get("market", "").endswith("-EUR") and "priceChangePercentage" in t:
+                filtered.append(t)
+
+        top = sorted(filtered, key=lambda x: float(x["priceChangePercentage"]), reverse=True)
         return [t["market"] for t in top[:30]]
+
     except Exception as e:
         print("🔴 خطأ جلب العملات:", e)
         return []
