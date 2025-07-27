@@ -11,8 +11,8 @@ app = Flask(__name__)
 r = redis.from_url(os.getenv("REDIS_URL"))
 
 # ✅ تحقق من وجود المفاتيح قبل إنشاء Bitvavo
-key = os.getenv("SCALPER_API_KEY")
-secret = os.getenv("SCALPER_API_SECRET")
+key = os.getenv("BITVAVO_API_KEY")
+secret = os.getenv("BITVAVO_API_SECRET")
 
 key = os.getenv("BITVAVO_API_KEY")
 secret = os.getenv("BITVAVO_API_SECRET")
