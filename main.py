@@ -10,10 +10,7 @@ from bitvavo_client.bitvavo import Bitvavo
 app = Flask(__name__)
 r = redis.from_url(os.getenv("REDIS_URL"))
 
-# ✅ تحقق من وجود المفاتيح قبل إنشاء Bitvavo
-key = os.getenv("BITVAVO_API_KEY")
-secret = os.getenv("BITVAVO_API_SECRET")
-
+# ✅ جلب المفاتيح من environment وتحقق منها
 key = os.getenv("BITVAVO_API_KEY")
 secret = os.getenv("BITVAVO_API_SECRET")
 
@@ -21,6 +18,7 @@ if not key or not secret:
     print("❌ تأكد من وجود BITVAVO_API_KEY و BITVAVO_API_SECRET في إعدادات Railway")
     exit()
 
+# ✅ إنشاء الكائن
 BITVAVO = Bitvavo({
     'APIKEY': key,
     'APISECRET': secret,
@@ -28,12 +26,13 @@ BITVAVO = Bitvavo({
     'WSURL': 'wss://ws.bitvavo.com/v2/'
 })
 
+# إعدادات عامة
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 CHAT_ID = os.getenv("CHAT_ID")
-BUY_AMOUNT = 10  # يورو
-
+BUY_AMOUNT = 10  # باليورو
 WATCHLIST_KEY = "scalper:watchlist"
 
+# ✅ إرسال رسالة تيليغرام
 def send_message(text):
     try:
         requests.post(f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage", data={
@@ -43,18 +42,23 @@ def send_message(text):
     except:
         pass
 
+# ✅ جلب Top 30 من Bitvavo
 def get_top_30():
     try:
         tickers = BITVAVO.ticker24h({})
         if isinstance(tickers, str):
             tickers = json.loads(tickers)
-
-        top = sorted([t for t in tickers if t['market'].endswith('-EUR')], key=lambda x: float(x['priceChangePercentage']), reverse=True)
-        return [t['market'] for t in top[:30]]
+        top = sorted(
+            [t for t in tickers if t["market"].endswith("-EUR")],
+            key=lambda x: float(x["priceChangePercentage"]),
+            reverse=True
+        )
+        return [t["market"] for t in top[:30]]
     except Exception as e:
         print("🔴 خطأ جلب العملات:", e)
         return []
 
+# ✅ السعر الحالي
 def get_price(symbol):
     try:
         res = BITVAVO.tickerPrice(symbol)
@@ -64,6 +68,7 @@ def get_price(symbol):
     except:
         return None
 
+# ✅ شموع 1m
 def get_candles(symbol):
     try:
         res = BITVAVO.candles(symbol, {'interval': '1m', 'limit': 3})
@@ -73,6 +78,7 @@ def get_candles(symbol):
     except:
         return []
 
+# ✅ التحليل والشراء
 def analyze(symbol):
     try:
         candles = get_candles(symbol)
@@ -86,8 +92,8 @@ def analyze(symbol):
         if not current_price:
             return
 
-        lower_bound = min([float(c[3]) for c in candles])
-        if current_price > lower_bound * 1.02:
+        lower = min(float(c[3]) for c in candles)
+        if current_price > lower * 1.02:
             return
 
         if close <= open_:
@@ -96,6 +102,7 @@ def analyze(symbol):
         if ((close - open_) / open_) * 100 < 0.3:
             return
 
+        # ✅ تنفيذ الشراء
         base = symbol.split("-")[0]
         payload = {
             "market": symbol,
@@ -106,11 +113,13 @@ def analyze(symbol):
         BITVAVO.placeOrder(payload)
         send_message(f"✅ اشترينا {base} 🧠 (النمس)")
 
+        # ✅ تابع للمراقبة
         threading.Thread(target=watch_sell, args=(symbol, current_price)).start()
 
     except Exception as e:
         print(f"❌ تحليل {symbol}:", e)
 
+# ✅ متابعة البيع
 def watch_sell(symbol, buy_price):
     try:
         peak = buy_price
@@ -141,6 +150,7 @@ def watch_sell(symbol, buy_price):
     except Exception as e:
         print(f"❌ بيع {symbol}:", e)
 
+# ✅ حلقة النمس
 def run_bot():
     while True:
         try:
@@ -157,6 +167,7 @@ def run_bot():
         except Exception as e:
             print("🔴 حلقة النمس:", e)
 
+# ✅ أمر "شو عم تعمل"
 @app.route('/', methods=['POST'])
 def webhook():
     msg = request.json.get("message", {}).get("text", "")
@@ -167,6 +178,7 @@ def webhook():
         send_message(msg)
     return "ok"
 
+# ✅ تشغيل السيرفر
 if __name__ == '__main__':
     threading.Thread(target=run_bot).start()
     app.run(host="0.0.0.0", port=int(os.getenv("PORT", 8080)))
