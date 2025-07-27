@@ -1,1 +1,1 @@
-web: python3 main.py --port=$PORT
+web: gunicorn main:app
