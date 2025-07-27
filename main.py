@@ -114,7 +114,6 @@ def analyze(symbol):
 # ✅ مراقبة البيع
 def watch_sell(symbol, buy_price):
     try:
-        peak = buy_price
         while True:
             time.sleep(0.5)
             current = get_price(symbol)
@@ -122,13 +121,11 @@ def watch_sell(symbol, buy_price):
                 continue
 
             change = (current - buy_price) / buy_price * 100
-            peak = max(peak, current)
-            retrace = (current - peak) / peak * 100
 
-            if change <= -2:
-                break
-            if peak > buy_price * 1.03 and retrace <= -1:
-                break
+            if change >= 1:
+                break  # ✅ الربح تحقق
+            if change <= -0.5:
+                break  # ❌ ستوب لوس
 
         base = symbol.split("-")[0]
         payload = {
@@ -138,7 +135,7 @@ def watch_sell(symbol, buy_price):
             "amount": str(BUY_AMOUNT)
         }
         BITVAVO.placeOrder(payload)
-        send_message(f"🚪 بيعنا {base} (النمس 🐆)")
+        send_message(f"🚪 بيعنا {base} (النمس 🐆) - نسبة التغيير: {round(change, 2)}%")
     except Exception as e:
         print(f"❌ بيع {symbol}:", e)
 
