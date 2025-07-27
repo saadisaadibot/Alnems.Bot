@@ -1,7 +1,6 @@
 import os, json, time, redis, requests
 from flask import Flask, request
 from threading import Thread
-from datetime import datetime
 from bitvavo_client.bitvavo import Bitvavo
 
 app = Flask(__name__)
@@ -106,16 +105,12 @@ def webhook():
     data = request.json
     msg = data.get("message", {}).get("text", "").lower()
     chat_id = str(data.get("message", {}).get("chat", {}).get("id", ""))
-    if chat_id != str(CHAT_ID):
-        return "ok"
-
     if msg.startswith("اشتري") and "يا نمس" in msg:
         coin = msg.split()[1].upper()
         symbol = coin + "-EUR"
-        source = "كوكو" if "يا نمس" in msg else "يدوي"
+        source = "كوكو" if chat_id != str(CHAT_ID) else "يدوي"
         execute_buy(symbol, source)
-
-    elif "الملخص" in msg:
+    elif "الملخص" in msg and chat_id == str(CHAT_ID):
         data = r.hgetall("profits")
         if not data:
             send_message("لا يوجد صفقات بعد.")
@@ -139,9 +134,4 @@ def webhook():
         for s, vals in sources.items():
             summary += f"\n- {s}: {round(vals['sum'],2)} EUR في {vals['count']} صفقة"
         send_message(summary)
-
     return "ok"
-
-# ========== تشغيل السيرفر ==========
-if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 3000)))
