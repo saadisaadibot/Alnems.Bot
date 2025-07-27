@@ -142,4 +142,5 @@ def webhook():
 if __name__ == "__main__":
     send_message("🐾 النمس بدأ - الشمعة المتأرجحة™")
     threading.Thread(target=watch_symbols).start()
-    app.run(host="0.0.0.0", port=8080)
+    port = int(os.environ.get("PORT", 8080))
+    app.run(host="0.0.0.0", port=port)
