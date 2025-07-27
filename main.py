@@ -7,7 +7,8 @@ app = Flask(__name__)
 BITVAVO = Bitvavo({
     'APIKEY': os.getenv("BITVAVO_API_KEY"),
     'APISECRET': os.getenv("BITVAVO_API_SECRET"),
-    'RESTURL': 'https://api.bitvavo.com/v2'
+    'RESTURL': 'https://api.bitvavo.com/v2',
+    'WSURL': 'wss://ws.bitvavo.com/v2/'
 })
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 CHAT_ID = os.getenv("CHAT_ID")
@@ -44,15 +45,22 @@ def sell(symbol, amount):
 def watch_symbols():
     def analyze(symbol):
         global symbol_in_position, entry_price
-        try:
-            while is_running and not symbol_in_position:
+
+        def callback(msg):
+            nonlocal symbol
+            if not is_running or symbol_in_position:
+                return
+            try:
+                price = float(msg['price'])
                 candles = BITVAVO.candles(symbol, {'interval': '1m', 'limit': 3})
                 if len(candles) < 3: return
-                c1, c2, c3 = [float(c[4]) for c in candles[-3:]]
+                c1, c2, c3 = candles[-3:]
 
-                price = float(BITVAVO.tickerPrice(symbol)["price"])
+                o, h, l, c = map(float, c3[:4])
+                percent_change = (c - o) / o * 100
 
-                if c3 > c2 and c2 < c1 and price <= c2 * 1.01:
+                if percent_change >= 0.3 and price <= l * 1.02:
+                    print(f"🚀 إشارة دخول {symbol} | سعر: {price} | صعود: {round(percent_change,2)}%")
                     res = buy(symbol)
                     filled_price = float(res.get("fills", [{}])[0].get("price", 0))
                     if filled_price:
@@ -60,7 +68,11 @@ def watch_symbols():
                         entry_price = filled_price
                         send_message(f"✅ النمس دخل {symbol} بسعر {filled_price} EUR")
                         threading.Thread(target=track_sell, args=(symbol,)).start()
-                time.sleep(1)
+            except Exception as e:
+                print(f"❌ تحليل {symbol}: {e}")
+
+        try:
+            BITVAVO.websocket.ticker(symbol, callback)
         except Exception as e:
             print(f"❌ WebSocket فشل {symbol}: {e}")
 
@@ -125,7 +137,7 @@ def webhook():
     return "", 200
 
 if __name__ == "__main__":
-    send_message("🐾 النمس بدأ - الشمعة المتأرجحة™")
+    send_message("🐾 النمس بدأ - الشمعة المتأرجحة™️ V2")
     threading.Thread(target=watch_symbols).start()
     port = int(os.environ.get("PORT", 8080))
     app.run(host="0.0.0.0", port=port)
