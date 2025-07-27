@@ -17,8 +17,9 @@ REDIS_URL = os.getenv("REDIS_URL")
 BUY_AMOUNT_EUR = float(os.getenv("BUY_AMOUNT_EUR", 10))
 r = redis.from_url(REDIS_URL)
 
-r.flushdb()  # ✅ تنظيف بيانات Redis عند التشغيل
+r.flushdb()
 
+# ========== أدوات أساسية ==========
 def send_message(text):
     try:
         requests.post(f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage", data={"chat_id": CHAT_ID, "text": text})
@@ -52,6 +53,18 @@ def fetch_price(symbol):
     except:
         return None
 
+def get_available_amount(symbol):
+    base = symbol.split("-")[0]
+    try:
+        balances = bitvavo_request("GET", "/balance")
+        for b in balances:
+            if b["symbol"] == base:
+                return float(b["available"])
+    except:
+        pass
+    return 0.0
+
+# ========== المراقبة بعد الشراء ==========
 def watch(symbol, entry_price, source):
     while True:
         time.sleep(0.5)
@@ -62,7 +75,11 @@ def watch(symbol, entry_price, source):
         if change >= 1.5 or change <= -1:
             break
 
-    amount = BUY_AMOUNT_EUR / entry_price
+    amount = get_available_amount(symbol)
+    if amount < 0.0001:
+        send_message(f"⚠️ لا يوجد رصيد كافٍ للبيع لـ {symbol}")
+        return
+
     order_body = {
         "amount": str(round(amount, 8)),
         "market": symbol,
@@ -72,18 +89,23 @@ def watch(symbol, entry_price, source):
     }
     result = bitvavo_request("POST", "/order", order_body)
 
-    profit = (price - entry_price) * amount
-    percent = ((price - entry_price) / entry_price) * 100
+    if "orderId" in result:
+        price = fetch_price(symbol)
+        profit = (price - entry_price) * amount
+        percent = ((price - entry_price) / entry_price) * 100
 
-    r.hset("profits", symbol, json.dumps({
-        "entry": entry_price,
-        "exit": price,
-        "profit": round(profit, 2),
-        "percent": round(percent, 2),
-        "source": source
-    }))
-    send_message(f"🚪 بيع {symbol} - النسبة: {round(percent,2)}% - المصدر: {source}")
+        r.hset("profits", symbol, json.dumps({
+            "entry": entry_price,
+            "exit": price,
+            "profit": round(profit, 2),
+            "percent": round(percent, 2),
+            "source": source
+        }))
+        send_message(f"🚪 بيع {symbol} - النسبة: {round(percent,2)}% - المصدر: {source}")
+    else:
+        send_message(f"❌ فشل في البيع: {result}")
 
+# ========== الشراء ==========
 def execute_buy(symbol, source):
     price = fetch_price(symbol)
     if not price:
@@ -105,6 +127,7 @@ def execute_buy(symbol, source):
     else:
         send_message(f"❌ فشل في الشراء: {result}")
 
+# ========== التفاعل مع Telegram ==========
 @app.route("/webhook", methods=["POST"])
 def webhook():
     data = request.get_json()
@@ -112,7 +135,7 @@ def webhook():
     if not msg:
         return "", 200
 
-    # ✅ دعم أمر كوكو أو يدوي
+    # أمر الشراء (كوكو أو يدوي)
     if msg.startswith("اشتري") and "يا نمس" in msg:
         coin = msg.split()[1].upper()
         symbol = coin + "-EUR"
@@ -120,6 +143,7 @@ def webhook():
         execute_buy(symbol, source)
         return "", 200
 
+    # أمر الملخص
     if "الملخص" in msg:
         data = r.hgetall("profits")
         if not data:
@@ -152,6 +176,7 @@ def webhook():
 def home():
     return "النمس 🐆 يعمل!", 200
 
+# ========== بدء التشغيل ==========
 if __name__ == "__main__":
     send_message("✅ النمس بدأ - يدوي وكوكو!")
     app.run(host="0.0.0.0", port=8080)
