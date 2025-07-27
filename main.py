@@ -20,12 +20,9 @@ BITVAVO = Bitvavo({
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 CHAT_ID = os.getenv("CHAT_ID")
 BUY_AMOUNT = 10
+IS_RUNNING_KEY = "scalper:running"
 IS_IN_TRADE = "scalper:in_trade"
-IS_RUNNING = "scalper:is_running"
-TRADE_LOG = "scalper:profits"
-
-# ✅ التفعيل المبدئي
-r.set(IS_RUNNING, "1")
+TRADE_HISTORY = "scalper:trades"
 
 def send_message(text):
     try:
@@ -75,38 +72,36 @@ def get_top_1():
             symbol = t.get("market", "")
             if not symbol.endswith("-EUR"):
                 continue
-
             candles = get_candles(symbol)
             if len(candles) < 3:
                 continue
-
             red_count = count_red_candles_from_end(candles)
             if red_count > 0:
                 candidates.append((symbol, red_count))
 
-        top = sorted(candidates, key=lambda x: x[1], reverse=True)
-        return top[0][0] if top else None
+        if not candidates:
+            return None
+
+        top = sorted(candidates, key=lambda x: x[1], reverse=True)[0]
+        return top[0]
     except:
         return None
 
-def start_trade_cycle():
-    if not r.get(IS_RUNNING):
+def analyze_and_buy():
+    if r.get(IS_IN_TRADE) or r.get(IS_RUNNING_KEY) != b"1":
         return
-    if r.get(IS_IN_TRADE):
-        return
+
     symbol = get_top_1()
     if not symbol:
         return
 
     try:
-        BITVAVO.placeOrder({
-            "market": symbol,
-            "side": "buy",
-            "orderType": "market",
+        base = symbol.split("-")[0]
+        BITVAVO.placeOrder(symbol, "buy", "market", {
             "amount": str(BUY_AMOUNT)
         })
         r.set(IS_IN_TRADE, symbol, ex=300)
-        send_message(f"✅ اشترينا {symbol} (النمس 🐆)")
+        send_message(f"✅ اشترينا {base} مباشرة بعد {symbol} (النمس 🐆)")
         threading.Thread(target=watch_sell, args=(symbol, get_price(symbol))).start()
     except Exception as e:
         print("❌ فشل في الشراء:", e)
@@ -118,66 +113,67 @@ def watch_sell(symbol, buy_price):
             current = get_price(symbol)
             if not current:
                 continue
+
             change = (current - buy_price) / buy_price * 100
             if change >= 1.5 or change <= -0.5:
                 break
 
-        BITVAVO.placeOrder({
-            "market": symbol,
-            "side": "sell",
-            "orderType": "market",
+        BITVAVO.placeOrder(symbol, "sell", "market", {
             "amount": str(BUY_AMOUNT)
         })
         r.delete(IS_IN_TRADE)
         base = symbol.split("-")[0]
         send_message(f"🚪 بيعنا {base} - النسبة: {round(change, 2)}%")
+        save_trade_result(change)
 
-        # تسجيل الصفقة
-        log = {
-            "symbol": symbol,
-            "profit": round(change, 2),
-            "ts": int(time.time())
-        }
-        r.rpush(TRADE_LOG, json.dumps(log))
-
-        # البدء بدورة جديدة
-        threading.Thread(target=delayed_start_trade).start()
+        # فورًا نبدأ دورة جديدة
+        time.sleep(1)
+        analyze_and_buy()
 
     except Exception as e:
-        print("❌ watch_sell:", e)
+        print("❌ فشل في البيع:", e)
         r.delete(IS_IN_TRADE)
 
-def delayed_start_trade():
-    time.sleep(1)
-    start_trade_cycle()
+def save_trade_result(pct):
+    try:
+        result = {
+            "pct": round(pct, 2),
+            "eur": round(BUY_AMOUNT * pct / 100, 2),
+            "ts": time.time()
+        }
+        r.rpush(TRADE_HISTORY, json.dumps(result))
+    except:
+        pass
 
 @app.route('/webhook', methods=['POST'])
 def webhook():
     msg = request.json.get("message", {}).get("text", "").lower()
     if "stop" in msg:
-        r.delete(IS_RUNNING)
-        send_message("⛔ تم إيقاف الشراء.")
+        r.set(IS_RUNNING_KEY, "0")
+        send_message("⛔ تم إيقاف عمليات الشراء.")
     elif "play" in msg:
-        r.set(IS_RUNNING, "1")
-        send_message("▶️ تم تفعيل الشراء.")
-        threading.Thread(target=start_trade_cycle).start()
+        r.set(IS_RUNNING_KEY, "1")
+        send_message("▶️ النمس بدأ - نسخة الأرجوحة السريعة!")
+        analyze_and_buy()
     elif "الملخص" in msg:
-        trades = [json.loads(r.lindex(TRADE_LOG, i)) for i in range(r.llen(TRADE_LOG))]
+        trades = r.lrange(TRADE_HISTORY, 0, -1)
         if not trades:
             send_message("لا توجد صفقات بعد.")
         else:
-            total = sum(t['profit'] for t in trades)
-            win = [t for t in trades if t['profit'] > 0]
-            loss = [t for t in trades if t['profit'] <= 0]
-            msg = f"""📊 ملخص Scalper:
-الصفقات: {len(trades)}
-✅ أرباح: {len(win)}
-❌ خسائر: {len(loss)}
-📈 الربح الصافي: {round(total, 2)}%"""
-            send_message(msg)
+            total = 0
+            summary = "📊 ملخص الصفقات:\n"
+            for t in trades:
+                data = json.loads(t.decode())
+                pct = data["pct"]
+                eur = data["eur"]
+                total += eur
+                emoji = "✅" if eur >= 0 else "❌"
+                summary += f"{emoji} {pct}% ({eur} €)\n"
+            summary += f"\n💰 الربح/الخسارة الكلي: {round(total,2)} €"
+            send_message(summary)
     return "ok"
 
 if __name__ == '__main__':
-    send_message("🐾 النمس بدأ - نسخة الأرجوحة السريعة!")
-    threading.Thread(target=start_trade_cycle).start()
+    r.set(IS_RUNNING_KEY, "1")
+    analyze_and_buy()
     app.run(host="0.0.0.0", port=int(os.getenv("PORT", 8080)))
