@@ -14,10 +14,10 @@ bitvavo = Bitvavo({
 })
 
 def get_symbols():
-    raw = bitvavo.markets()
     try:
+        raw = bitvavo.markets()
         markets = json.loads(raw) if isinstance(raw, str) else raw
-        return [m['market'] for m in markets if m['quote'] == 'EUR']
+        return [m['market'] for m in markets if isinstance(m, dict) and m.get('quote') == 'EUR']
     except Exception as e:
         print("❌ فشل جلب الرموز:", e)
         return []
