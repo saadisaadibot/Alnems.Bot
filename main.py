@@ -38,32 +38,43 @@ def fetch_price(symbol):
     except:
         return None
 
-def buy(symbol):
-    try:
-        price = fetch_price(symbol)
-        if not price:
-            return None, None
+def buy(symbol, source="ai"):
+    if r.hexists("entry", symbol):
+        send_message(f"⚠️ تم شراء {symbol} مسبقًا، بانتظار البيع.")
+        return False
 
-        amount = round(BUY_AMOUNT_EUR / price, 6)
-        order = BITVAVO.placeOrder({
-            "market": symbol,
-            "side": "buy",
-            "orderType": "market",
-            "amount": str(amount)
-        })
+    balance = bitvavo_request("GET", "/balance")
+    eur_balance = next((float(b['available']) for b in balance if b['symbol'] == 'EUR'), 0)
 
-        # تحقق من تنفيذ الطلب
-        filled = float(order.get("filledAmount", 0))
-        executed_price = float(order.get("avgExecutionPrice", price))
+    if eur_balance < BUY_AMOUNT_EUR:
+        send_message(f"🚫 لا يمكن شراء {symbol}، الرصيد غير كافٍ ({eur_balance:.2f} EUR).")
+        return False
 
-        if filled == 0:
-            print(f"🚫 لم يتم تنفيذ أمر شراء {symbol}")
-            return None, None
+    order_body = {
+        "amountQuote": str(BUY_AMOUNT_EUR),
+        "market": symbol,
+        "side": "buy",
+        "orderType": "market",
+        "operatorId": ""
+    }
+    result = bitvavo_request("POST", "/order", order_body)
 
-        return order, executed_price
-    except Exception as e:
-        print("خطأ في الشراء:", e)
-        return None, None
+    if "orderId" in result:
+        price = float(result.get("avgPrice", "0") or "0")
+        if price == 0:
+            price = fetch_price(symbol)
+        if price:
+            r.hset("orders", symbol, "شراء")
+            r.hset("entry", symbol, price)
+            r.hset("peak", symbol, price)
+            r.hset("source", symbol, source)
+            send_message(f"✅ تم شراء {symbol} بسعر {price} EUR")
+            return price
+        else:
+            send_message(f"❌ تم تنفيذ الشراء لكن لم نستطع تحديد السعر لـ {symbol}")
+    else:
+        send_message(f"❌ فشل الشراء: {result.get('error', 'غير معروف')}")
+    return False
 
 def sell(symbol, amount):
     try:
