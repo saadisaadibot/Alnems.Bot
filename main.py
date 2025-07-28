@@ -157,7 +157,7 @@ def telegram_webhook():
         send_message(msg)
     elif text == "reset":
         r.delete(IN_TRADE_KEY)
-            send_message("✅ تم مسح الصفقة العالقة.")
+        send_message("✅ تم مسح الصفقة العالقة.")
 
     elif text == "الملخص":
         trades = r.lrange("nems:trades", 0, -1)
