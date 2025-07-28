@@ -37,3 +37,12 @@ def get_rsi(symbol, interval="1m", limit=100):
     rs = avg_gain / avg_loss
     rsi = 100 - (100 / (1 + rs))
     return round(rsi, 2)
+    # ... get_rsi() كما هو
+
+def get_volume_spike(candles, multiplier=1.5):
+    if len(candles) < 6:
+        return False
+    volumes = [float(c[5]) for c in candles[:-1]]
+    avg_volume = sum(volumes) / len(volumes)
+    last_volume = float(candles[-1][5])
+    return last_volume > avg_volume * multiplier
