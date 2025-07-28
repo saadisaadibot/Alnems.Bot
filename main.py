@@ -5,7 +5,7 @@ import redis
 import requests
 from flask import Flask, request, jsonify
 from bitvavo_client.bitvavo import Bitvavo
-from market import pick_best_symbol
+from market_scanner import pick_best_symbol
 from memory import save_trade
 
 app = Flask(__name__)
