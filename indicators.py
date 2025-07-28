@@ -19,7 +19,8 @@ def get_rsi(candles, period=14):
     rsi = 100 - (100 / (1 + rs))
     return rsi
 
-def get_volume_spike(candles, multiplier=2.5):
+# ✅ خففنا شرط الفوليوم (من 2.5x إلى 1.5x)
+def get_volume_spike(candles, multiplier=1.5):
     if len(candles) < 6:
         return False
     volumes = [float(c[5]) for c in candles[:-1]]
@@ -27,6 +28,7 @@ def get_volume_spike(candles, multiplier=2.5):
     last_volume = float(candles[-1][5])
     return last_volume > avg_volume * multiplier
 
+# ✅ نفس الشرط لكن مع السماح بمرونة الدخول
 def get_bullish_candle(prev_candle, curr_candle):
     prev_close = float(prev_candle[4])
     curr_open = float(curr_candle[1])
