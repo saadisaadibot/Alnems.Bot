@@ -14,6 +14,7 @@ BITVAVO = Bitvavo({
 
 def pick_best_symbol():
     level = int(r.get("nems:rsi_level") or 46)
+
     try:
         markets = BITVAVO.markets()
         print(f"✅ تم جلب عدد الأسواق: {len(markets)}")
