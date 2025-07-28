@@ -1,3 +1,5 @@
-requests
-websocket-client
+flask
 redis
+requests
+python-dotenv
+websocket-client
