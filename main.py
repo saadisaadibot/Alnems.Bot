@@ -42,17 +42,28 @@ def buy(symbol):
     try:
         price = fetch_price(symbol)
         if not price:
-            return None
+            return None, None
+
         amount = round(BUY_AMOUNT_EUR / price, 6)
-        return BITVAVO.placeOrder({
+        order = BITVAVO.placeOrder({
             "market": symbol,
             "side": "buy",
             "orderType": "market",
             "amount": str(amount)
         })
+
+        # تحقق من تنفيذ الطلب
+        filled = float(order.get("filledAmount", 0))
+        executed_price = float(order.get("avgExecutionPrice", price))
+
+        if filled == 0:
+            print(f"🚫 لم يتم تنفيذ أمر شراء {symbol}")
+            return None, None
+
+        return order, executed_price
     except Exception as e:
         print("خطأ في الشراء:", e)
-        return None
+        return None, None
 
 def sell(symbol, amount):
     try:
@@ -114,13 +125,11 @@ def run_loop():
             continue
 
         print(f"✅ فرصة على {symbol} | {reason} | Score={score}")
-        price = fetch_price(symbol)
-        if not price:
-            time.sleep(5)
-            continue
+        order, price = buy(symbol)
+        if not order:
+            continue  # تجاهل الصفقة إذا فشل الشراء
 
         r.set(IN_TRADE_KEY, symbol)
-        buy(symbol)
         watch(symbol, price, reason)
 
 @app.route("/", methods=["POST"])
