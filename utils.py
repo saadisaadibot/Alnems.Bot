@@ -1,8 +1,5 @@
 import os
-import redis
 from bitvavo_client.bitvavo import Bitvavo
-
-r = redis.from_url(os.getenv("REDIS_URL"))
 
 BITVAVO = Bitvavo({
     'APIKEY'   : os.getenv("BITVAVO_API_KEY"),
@@ -31,15 +28,12 @@ def get_rsi(symbol, interval="1m", limit=100):
 
     avg_gain = sum(gains[-14:]) / 14
     avg_loss = sum(losses[-14:]) / 14 or 0.0001
-
     rs = avg_gain / avg_loss
-    rsi = 100 - (100 / (1 + rs))
-    return round(rsi, 2)
+    return round(100 - (100 / (1 + rs)), 2)
 
 def get_volume_spike(candles, multiplier=1.5):
     if len(candles) < 6:
         return False
     volumes = [float(c[5]) for c in candles[:-1]]
     avg_volume = sum(volumes) / len(volumes)
-    last_volume = float(candles[-1][5])
-    return last_volume > avg_volume * multiplier
+    return float(candles[-1][5]) > avg_volume * multiplier
