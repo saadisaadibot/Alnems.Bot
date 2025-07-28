@@ -1,10 +1,11 @@
 import time
 import json
 import redis
+import os  # <–– هذا هو اللي ناقص
 from bitvavo_client.bitvavo import Bitvavo
 from indicators import get_rsi, get_volume_spike, get_bullish_candle
 
-r = redis.from_url("YOUR_REDIS_URL")
+r = redis.from_url(os.getenv("REDIS_URL"))
 bitvavo = Bitvavo({
     'APIKEY': 'YOUR_API_KEY',
     'APISECRET': 'YOUR_API_SECRET',
