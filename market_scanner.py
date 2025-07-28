@@ -52,6 +52,7 @@ def pick_best_symbol():
 
             # حساب RSI والتحقق من مستواه
             rsi = get_rsi(symbol)
+            print(f"🔍 {symbol} | Change={price_change:.2f}% | Volume={volume:.0f} | RSI={rsi:.2f} | Spike={get_volume_spike(candles)}")
             if rsi >= level:
                 continue
 
