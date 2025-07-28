@@ -1,23 +1,15 @@
 import os
-import json
 import redis
-import time
-from datetime import datetime
 
+# الاتصال بقاعدة بيانات Redis
 r = redis.from_url(os.getenv("REDIS_URL"))
 
-def save_trade(symbol, entry_price, exit_price, entry_reason, result, percent, source="تلقائي"):
-    trade_data = {
-        "symbol": symbol,
-        "entry_time": datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S'),
-        "exit_time": datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S'),
-        "entry_price": entry_price,
-        "exit_price": exit_price,
-        "entry_reason": entry_reason,
-        "result": result,
-        "percent": round(percent, 2),
-        "source": source
-    }
-
-    trades_key = "nems:trades"
-    r.rpush(trades_key, json.dumps(trade_data))
+# حفظ صفقة في الذاكرة
+def save_trade(symbol, entry_price, exit_price, reason, result, percent):
+    text = (
+        f"{symbol} | دخول: {round(entry_price, 4)} | "
+        f"خروج: {round(exit_price, 4)} | "
+        f"{result} ({round(percent, 2)}%) | سبب: {reason}"
+    )
+    r.lpush("nems:trades", text)
+    r.ltrim("nems:trades", 0, 49)  # يحتفظ بآخر 50 صفقة فقط
