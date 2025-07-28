@@ -49,18 +49,34 @@ def buy(symbol):
 
         amount = round(BUY_AMOUNT_EUR / price, 6)
         body = {
+            "amount": str(amount),
             "market": symbol,
             "side": "buy",
             "orderType": "market",
-            "amount": str(amount),
-            "operatorId": ""  # مهم جداً لحل الخطأ
+            "operatorId": ""  # ضروري لتفادي الخطأ 203
         }
 
-        result = bitvavo_request("POST", "/order", body)
+        result = BITVAVO.placeOrder(
+            symbol,           # market
+            "buy",            # side
+            "market",         # orderType
+            {"amount": str(amount), "operatorId": ""}
+        )
 
-        if "error" in result or float(result.get("filledAmount", 0)) == 0:
+        print("🧾 تفاصيل أمر الشراء =", result)
+
+        filled = float(result.get("filledAmount", 0))
+        executed_price = float(result.get("avgExecutionPrice", price))
+
+        if filled == 0:
             print(f"🚫 لم يتم تنفيذ أمر شراء {symbol}")
             return None, None
+
+        return result, executed_price
+
+    except Exception as e:
+        print("خطأ في الشراء:", e)
+        return None, None
 
         executed_price = float(result.get("avgExecutionPrice", price))
         return result, executed_price
