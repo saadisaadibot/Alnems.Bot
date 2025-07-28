@@ -1,14 +1,13 @@
-import time
 import os
-import redis
+import time
 import threading
+import redis
 import requests
 from flask import Flask, request, jsonify
-from market_scanner import pick_best_symbol
-from memory import save_trade
 from bitvavo_client.bitvavo import Bitvavo
+from market import pick_best_symbol
+from memory import save_trade
 
-# إعداد
 app = Flask(__name__)
 r = redis.from_url(os.getenv("REDIS_URL"))
 
@@ -22,14 +21,13 @@ BITVAVO = Bitvavo({
 BUY_AMOUNT_EUR = float(os.getenv("BUY_AMOUNT_EUR", 10))
 IN_TRADE_KEY = "nems:in_trade"
 IS_RUNNING_KEY = "scanner:enabled"
-CHAT_ID = os.getenv("CHAT_ID")
 BOT_TOKEN = os.getenv("BOT_TOKEN")
+CHAT_ID = os.getenv("CHAT_ID")
 
 def send_message(text):
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
-    data = {"chat_id": CHAT_ID, "text": text}
     try:
-        requests.post(url, data=data)
+        requests.post(url, data={"chat_id": CHAT_ID, "text": text})
     except:
         pass
 
@@ -41,26 +39,32 @@ def fetch_price(symbol):
         return None
 
 def buy(symbol):
-    price = fetch_price(symbol)
-    if not price:
+    try:
+        price = fetch_price(symbol)
+        if not price:
+            return None
+        amount = round(BUY_AMOUNT_EUR / price, 6)
+        return BITVAVO.placeOrder({
+            "market": symbol,
+            "side": "buy",
+            "orderType": "market",
+            "amount": str(amount)
+        })
+    except Exception as e:
+        print("خطأ في الشراء:", e)
         return None
-    amount = round(BUY_AMOUNT_EUR / price, 6)
-    response = BITVAVO.placeOrder({
-        "market": symbol,
-        "side": "buy",
-        "orderType": "market",
-        "amount": str(amount)
-    })
-    return response
 
 def sell(symbol, amount):
-    response = BITVAVO.placeOrder({
-        "market": symbol,
-        "side": "sell",
-        "orderType": "market",
-        "amount": str(amount)
-    })
-    return response
+    try:
+        return BITVAVO.placeOrder({
+            "market": symbol,
+            "side": "sell",
+            "orderType": "market",
+            "amount": str(amount)
+        })
+    except Exception as e:
+        print("خطأ في البيع:", e)
+        return None
 
 def watch(symbol, entry_price, reason):
     max_price = entry_price
@@ -74,11 +78,11 @@ def watch(symbol, entry_price, reason):
         change = (price - entry_price) / entry_price * 100
 
         if change >= 1.5:
-            result = "ربح"
+            result = "ربح ✅"
             percent = change
             break
         elif change <= -1:
-            result = "خسارة"
+            result = "خسارة ❌"
             percent = change
             break
 
@@ -93,10 +97,9 @@ def watch(symbol, entry_price, reason):
     r.delete(IN_TRADE_KEY)
 
 def run_loop():
-    r.set(IS_RUNNING_KEY, 1)  # بدء التشغيل تلقائياً
+    r.set(IS_RUNNING_KEY, 1)
     while True:
         if r.get(IS_RUNNING_KEY) != b"1":
-            print("⏸️ النمس موقوف مؤقتاً.")
             time.sleep(5)
             continue
 
@@ -105,9 +108,9 @@ def run_loop():
             continue
 
         symbol, reason, score = pick_best_symbol()
-        if score < 1:
-            print("❌ لا يوجد فرصة قوية حالياً.")
-            time.sleep(15)
+        if not symbol:
+            print("❌ لا توجد فرصة مناسبة حالياً.")
+            time.sleep(30)
             continue
 
         print(f"✅ فرصة على {symbol} | {reason} | Score={score}")
@@ -127,29 +130,31 @@ def telegram_webhook():
         return jsonify({"status": "no message"}), 200
 
     text = data["message"].get("text", "").strip().lower()
-
+    
     if text == "stop":
         r.set(IS_RUNNING_KEY, 0)
-        send_message("⛔ تم إيقاف النمس.")
+        send_message("⛔ تم إيقاف النمس مؤقتاً.")
     elif text == "play":
         r.set(IS_RUNNING_KEY, 1)
         send_message("✅ تم تشغيل النمس.")
     elif text == "شو عم تعمل":
-        status = r.get(IS_RUNNING_KEY)
-        reply = "🤖 النمس يعمل حالياً." if status == b"1" else "⏸️ النمس موقوف حالياً."
-        send_message(reply)
+        running = r.get(IS_RUNNING_KEY) == b"1"
+        trade = r.get(IN_TRADE_KEY)
+        msg = "🤖 النمس يعمل حالياً ✅\n" if running else "⏸️ النمس موقوف حالياً.\n"
+        if trade:
+            msg += f"حالياً في صفقة على {trade.decode()}."
+        else:
+            msg += "لا يوجد صفقة حالياً."
+        send_message(msg)
     elif text == "الملخص":
         trades = r.lrange("nems:trades", 0, -1)
         if not trades:
-            send_message("لا يوجد صفقات بعد.")
+            send_message("لا توجد صفقات مسجلة بعد.")
         else:
-            summary = "📊 الملخص:\n"
-            for t in trades:
-                info = t.decode()
-                summary += f"• {info}\n"
-            send_message(summary)
-    else:
-        send_message("❌ أمر غير معروف.")
+            msg = "📊 ملخص الصفقات:\n"
+            for t in trades[-10:][::-1]:
+                msg += f"• {t.decode()}\n"
+            send_message(msg)
 
     return jsonify({"status": "ok"}), 200
 
