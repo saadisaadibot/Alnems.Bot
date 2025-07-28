@@ -45,6 +45,7 @@ def buy(symbol):
     try:
         price = fetch_price(symbol)
         if not price:
+            print(f"❌ فشل في جلب السعر لـ {symbol}")
             return None, None
 
         amount = round(BUY_AMOUNT_EUR / price, 6)
@@ -59,14 +60,18 @@ def buy(symbol):
             body              # body
         )
 
+        # ✅ طباعة تفاصيل الأمر للمراجعة
+        print(f"🧾 تفاصيل أمر الشراء لـ {symbol}: {order}")
+
         filled = float(order.get("filledAmount", 0))
         executed_price = float(order.get("avgExecutionPrice", price))
 
         if filled == 0:
-            print(f"🚫 لم يتم تنفيذ أمر شراء {symbol}")
+            print(f"🚫 لم يتم تنفيذ أمر شراء {symbol} (filled = 0)")
             return None, None
 
         return order, executed_price
+
     except Exception as e:
         print("خطأ في الشراء:", e)
         return None, None
