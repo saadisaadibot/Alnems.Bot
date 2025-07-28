@@ -24,12 +24,14 @@ IS_RUNNING_KEY = "scanner:enabled"
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 CHAT_ID = os.getenv("CHAT_ID")
 
+
 def send_message(text):
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
     try:
         requests.post(url, data={"chat_id": CHAT_ID, "text": text})
     except:
         pass
+
 
 def fetch_price(symbol):
     try:
@@ -38,43 +40,37 @@ def fetch_price(symbol):
     except:
         return None
 
-def buy(symbol, source="ai"):
-    if r.hexists("entry", symbol):
-        send_message(f"⚠️ تم شراء {symbol} مسبقًا، بانتظار البيع.")
-        return False
 
-    balance = bitvavo_request("GET", "/balance")
-    eur_balance = next((float(b['available']) for b in balance if b['symbol'] == 'EUR'), 0)
+def buy(symbol):
+    try:
+        price = fetch_price(symbol)
+        if not price:
+            return None, None
 
-    if eur_balance < BUY_AMOUNT_EUR:
-        send_message(f"🚫 لا يمكن شراء {symbol}، الرصيد غير كافٍ ({eur_balance:.2f} EUR).")
-        return False
+        amount = round(BUY_AMOUNT_EUR / price, 6)
+        body = {
+            "amount": str(amount)
+        }
 
-    order_body = {
-        "amountQuote": str(BUY_AMOUNT_EUR),
-        "market": symbol,
-        "side": "buy",
-        "orderType": "market",
-        "operatorId": ""
-    }
-    result = bitvavo_request("POST", "/order", order_body)
+        order = BITVAVO.placeOrder(
+            symbol,           # market
+            "buy",            # side
+            "market",         # orderType
+            body              # body
+        )
 
-    if "orderId" in result:
-        price = float(result.get("avgPrice", "0") or "0")
-        if price == 0:
-            price = fetch_price(symbol)
-        if price:
-            r.hset("orders", symbol, "شراء")
-            r.hset("entry", symbol, price)
-            r.hset("peak", symbol, price)
-            r.hset("source", symbol, source)
-            send_message(f"✅ تم شراء {symbol} بسعر {price} EUR")
-            return price
-        else:
-            send_message(f"❌ تم تنفيذ الشراء لكن لم نستطع تحديد السعر لـ {symbol}")
-    else:
-        send_message(f"❌ فشل الشراء: {result.get('error', 'غير معروف')}")
-    return False
+        filled = float(order.get("filledAmount", 0))
+        executed_price = float(order.get("avgExecutionPrice", price))
+
+        if filled == 0:
+            print(f"🚫 لم يتم تنفيذ أمر شراء {symbol}")
+            return None, None
+
+        return order, executed_price
+    except Exception as e:
+        print("خطأ في الشراء:", e)
+        return None, None
+
 
 def sell(symbol, amount):
     try:
@@ -87,6 +83,7 @@ def sell(symbol, amount):
     except Exception as e:
         print("خطأ في البيع:", e)
         return None
+
 
 def watch(symbol, entry_price, reason):
     max_price = entry_price
@@ -118,6 +115,7 @@ def watch(symbol, entry_price, reason):
     save_trade(symbol, entry_price, price, reason, result, percent)
     r.delete(IN_TRADE_KEY)
 
+
 def run_loop():
     r.set(IS_RUNNING_KEY, 1)
     while True:
@@ -138,10 +136,11 @@ def run_loop():
         print(f"✅ فرصة على {symbol} | {reason} | Score={score}")
         order, price = buy(symbol)
         if not order:
-            continue  # تجاهل الصفقة إذا فشل الشراء
+            continue
 
         r.set(IN_TRADE_KEY, symbol)
         watch(symbol, price, reason)
+
 
 @app.route("/", methods=["POST"])
 def telegram_webhook():
@@ -150,7 +149,7 @@ def telegram_webhook():
         return jsonify({"status": "no message"}), 200
 
     text = data["message"].get("text", "").strip().lower()
-    
+
     if text == "stop":
         r.set(IS_RUNNING_KEY, 0)
         send_message("⛔ تم إيقاف النمس مؤقتاً.")
@@ -169,7 +168,6 @@ def telegram_webhook():
     elif text == "reset":
         r.delete(IN_TRADE_KEY)
         send_message("✅ تم مسح الصفقة العالقة.")
-
     elif text == "الملخص":
         trades = r.lrange("nems:trades", 0, -1)
         if not trades:
@@ -181,6 +179,7 @@ def telegram_webhook():
             send_message(msg)
 
     return jsonify({"status": "ok"}), 200
+
 
 if __name__ == "__main__":
     threading.Thread(target=run_loop).start()
