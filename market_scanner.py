@@ -16,12 +16,13 @@ BITVAVO = Bitvavo({
 
 # الدالة الرئيسية لاختيار أفضل عملة
 def pick_best_symbol():
-    # جلب مستوى RSI المطلوب من Redis
     level = int(r.get("nems:rsi_level") or 46)
 
     try:
         markets = BITVAVO.markets()
-    except:
+        print(f"✅ تم جلب عدد الأسواق: {len(markets)}")
+    except Exception as e:
+        print(f"❌ فشل جلب الأسواق: {e}")
         return None, None, None
 
     candidates = []
@@ -41,31 +42,32 @@ def pick_best_symbol():
             price_change = float(ticker.get("priceChangePercentage", 0))
             volume = float(ticker.get("volume", 0))
 
-            # فلترة أولية
             if price_change <= 1 or volume < 500:
                 continue
 
-            # جلب الشموع وفحص الزخم
+            # جلب الشموع
             candles = BITVAVO.candles(symbol, "1m", {"limit": 10})
-            if not get_volume_spike(candles):
-                continue
+            spike = get_volume_spike(candles)
 
-            # حساب RSI والتحقق من مستواه
+            # حساب RSI
             rsi = get_rsi(symbol)
-            print(f"🔍 {symbol} | Change={price_change:.2f}% | Volume={volume:.0f} | RSI={rsi:.2f} | Spike={get_volume_spike(candles)}")
-            if rsi >= level:
+
+            # ✅ طباعة تفصيلية لكل عملة يتم تحليلها
+            print(f"🔍 {symbol} | Change={price_change:.2f}% | Volume={volume:.0f} | RSI={rsi:.2f} | Spike={spike}")
+
+            if not spike or rsi >= level:
                 continue
 
-            # أضف إلى المرشحين
             candidates.append((symbol, rsi, price_change))
 
-        except:
+        except Exception as e:
+            print(f"⚠️ خطأ أثناء تحليل {symbol}: {e}")
             continue
 
-    # اختيار الأفضل حسب أقل RSI
     if not candidates:
         return None, None, None
 
-    candidates.sort(key=lambda x: x[1])  # الأقل RSI أولاً
+    # ترتيب حسب أقل RSI
+    candidates.sort(key=lambda x: x[1])
     best = candidates[0]
     return best[0], f"RSI={best[1]}, Change={best[2]}", best[2]
