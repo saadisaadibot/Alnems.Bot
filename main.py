@@ -21,9 +21,9 @@ BITVAVO = Bitvavo({
 BUY_AMOUNT_EUR = float(os.getenv("BUY_AMOUNT_EUR", 10))
 IN_TRADE_KEY = "nems:in_trade"
 IS_RUNNING_KEY = "scanner:enabled"
+RSI_LEVEL_KEY = "nems:rsi_level"
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 CHAT_ID = os.getenv("CHAT_ID")
-
 
 def send_message(text):
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
@@ -32,14 +32,12 @@ def send_message(text):
     except:
         pass
 
-
 def fetch_price(symbol):
     try:
         price = BITVAVO.tickerPrice({"market": symbol})
         return float(price["price"])
     except:
         return None
-
 
 def buy(symbol):
     try:
@@ -48,62 +46,54 @@ def buy(symbol):
             return None, None
 
         amount = round(BUY_AMOUNT_EUR / price, 6)
-        body = {
-            "amount": str(amount),
+        order = BITVAVO.placeOrder({
             "market": symbol,
             "side": "buy",
             "orderType": "market",
-            "operatorId": ""  # ضروري لتفادي الخطأ 203
-        }
+            "amount": str(amount),
+            "operatorId": ""
+        })
 
-        result = BITVAVO.placeOrder(
-            symbol,           # market
-            "buy",            # side
-            "market",         # orderType
-            {"amount": str(amount), "operatorId": ""}
-        )
-
-        print("🧾 تفاصيل أمر الشراء =", result)
-
-        filled = float(result.get("filledAmount", 0))
-        executed_price = float(result.get("avgExecutionPrice", price))
+        filled = float(order.get("filledAmount", 0))
+        executed_price = float(order.get("avgExecutionPrice", price))
 
         if filled == 0:
             print(f"🚫 لم يتم تنفيذ أمر شراء {symbol}")
             return None, None
 
-        return result, executed_price
-
-    except Exception as e:
-        print("خطأ في الشراء:", e)
-        return None, None
-
-        executed_price = float(result.get("avgExecutionPrice", price))
-        return result, executed_price
-
-    except Exception as e:
-        print("خطأ في الشراء:", e)
-        return None, None
-
+        coin = symbol.split("-")[0]
+        send_message(f"{coin} 🤖 {round(executed_price, 4)}")
         return order, executed_price
-
     except Exception as e:
         print("خطأ في الشراء:", e)
         return None, None
 
-
-def sell(symbol, amount):
+def sell(symbol, amount, entry_price):
     try:
-        return BITVAVO.placeOrder({
+        result = BITVAVO.placeOrder({
             "market": symbol,
             "side": "sell",
             "orderType": "market",
             "amount": str(amount)
         })
+
+        price = fetch_price(symbol)
+        change = (price - entry_price) / entry_price * 100
+        coin = symbol.split("-")[0]
+        send_message(f"{coin} {round(change, 2)}%")
+
+        return result
     except Exception as e:
         print("خطأ في البيع:", e)
         return None
 
+def adjust_rsi(result):
+    level = int(r.get(RSI_LEVEL_KEY) or 46)
+    if result == "ربح ✅":
+        level = max(level - 1, 30)
+    else:
+        level = min(level + 1, 70)
+    r.set(RSI_LEVEL_KEY, level)
 
 def watch(symbol, entry_price, reason):
     max_price = entry_price
@@ -130,11 +120,11 @@ def watch(symbol, entry_price, reason):
     balances = BITVAVO.balance(symbol.split("-")[0])
     amount = float(balances[0].get("available", 0))
     if amount > 0:
-        sell(symbol, round(amount, 6))
+        sell(symbol, round(amount, 6), entry_price)
 
     save_trade(symbol, entry_price, price, reason, result, percent)
+    adjust_rsi(result)
     r.delete(IN_TRADE_KEY)
-
 
 def run_loop():
     r.set(IS_RUNNING_KEY, 1)
@@ -160,7 +150,6 @@ def run_loop():
 
         r.set(IN_TRADE_KEY, symbol)
         watch(symbol, price, reason)
-
 
 @app.route("/", methods=["POST"])
 def telegram_webhook():
@@ -199,7 +188,6 @@ def telegram_webhook():
             send_message(msg)
 
     return jsonify({"status": "ok"}), 200
-
 
 if __name__ == "__main__":
     threading.Thread(target=run_loop).start()
