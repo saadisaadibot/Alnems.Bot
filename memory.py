@@ -1,9 +1,10 @@
+import redis
+import os
 import json
 import time
-import redis
 from datetime import datetime
 
-r = redis.from_url("YOUR_REDIS_URL")  # عدّل حسب مشروعك
+r = redis.from_url(os.getenv("REDIS_URL"))دّل حسب مشروعك
 
 def save_trade(symbol, entry_price, exit_price, entry_reason, result, percent, source="تلقائي"):
     trade_data = {
