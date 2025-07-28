@@ -3,10 +3,8 @@ import redis
 from bitvavo_client.bitvavo import Bitvavo
 from utils import get_rsi, get_volume_spike
 
-# إعداد الاتصال بـ Redis
 r = redis.from_url(os.getenv("REDIS_URL"))
 
-# إعداد الاتصال بـ Bitvavo
 BITVAVO = Bitvavo({
     'APIKEY'   : os.getenv("BITVAVO_API_KEY"),
     'APISECRET': os.getenv("BITVAVO_API_SECRET"),
@@ -14,10 +12,8 @@ BITVAVO = Bitvavo({
     'WSURL'    : 'wss://ws.bitvavo.com/v2'
 })
 
-# الدالة الرئيسية لاختيار أفضل عملة
 def pick_best_symbol():
     level = int(r.get("nems:rsi_level") or 46)
-
     try:
         markets = BITVAVO.markets()
         print(f"✅ تم جلب عدد الأسواق: {len(markets)}")
@@ -36,35 +32,29 @@ def pick_best_symbol():
             continue
 
         try:
-            # جلب بيانات السوق
-            ticker = BITVAVO.ticker24h({"market": symbol})
-            price_change_raw = ticker.get("priceChangePercentage")
-            volume_raw = ticker.get("volume")
-
-            if price_change_raw is None or volume_raw is None:
-                print(f"⛔ بيانات ناقصة لـ {symbol}")
-                continue
-
-            price_change = float(price_change_raw)
-            volume = float(volume_raw)
-
-            if price_change <= 1 or volume < 500:
-                continue
-
-            # جلب الشموع
             candles = BITVAVO.candles(symbol, "1m", {"limit": 10})
-            spike = get_volume_spike(candles)
+            if len(candles) < 2:
+                continue
+
+            first = float(candles[0][4])
+            last = float(candles[-1][4])
+            price_change = ((last - first) / first) * 100
+            volume_sum = sum(float(c[5]) for c in candles)
+
+            if price_change <= 1 or volume_sum < 500:
+                continue
+
+            if not get_volume_spike(candles):
+                continue
+
             rsi = get_rsi(symbol)
-
-            print(f"🔍 {symbol} | Change={price_change:.2f}% | Volume={volume:.0f} | RSI={rsi:.2f} | Spike={spike}")
-
-            if not spike or rsi >= level:
+            if rsi >= level:
                 continue
 
             candidates.append((symbol, rsi, price_change))
 
         except Exception as e:
-            print(f"⚠️ خطأ أثناء تحليل {symbol}: {e}")
+            print(f"⚠️ تحليل فشل لـ {symbol}: {e}")
             continue
 
     if not candidates:
