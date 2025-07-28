@@ -6,61 +6,50 @@ from utils import get_rsi, get_volume_spike
 r = redis.from_url(os.getenv("REDIS_URL"))
 
 BITVAVO = Bitvavo({
-    'APIKEY'   : os.getenv("BITVAVO_API_KEY"),
+    'APIKEY': os.getenv("BITVAVO_API_KEY"),
     'APISECRET': os.getenv("BITVAVO_API_SECRET"),
-    'RESTURL'  : 'https://api.bitvavo.com/v2',
-    'WSURL'    : 'wss://ws.bitvavo.com/v2'
+    'RESTURL': 'https://api.bitvavo.com/v2',
+    'WSURL': 'wss://ws.bitvavo.com/v2'
 })
 
 def pick_best_symbol():
-    level = int(r.get("nems:rsi_level") or 46)
-
+    rsi_level = int(r.get("nems:rsi_level") or 46)
     try:
         markets = BITVAVO.markets()
-        print(f"✅ تم جلب عدد الأسواق: {len(markets)}")
-    except Exception as e:
-        print(f"❌ فشل جلب الأسواق: {e}")
+    except:
         return None, None, None
 
     candidates = []
 
-    for market_data in markets:
-        if not isinstance(market_data, dict):
+    for m in markets:
+        if not isinstance(m, dict):
             continue
 
-        symbol = market_data.get("market", "")
+        symbol = m.get("market", "")
         if not symbol.endswith("-EUR"):
             continue
 
         try:
-            candles = BITVAVO.candles(symbol, "1m", {"limit": 10})
-            if len(candles) < 2:
-                continue
-
-            first = float(candles[0][4])
-            last = float(candles[-1][4])
-            price_change = ((last - first) / first) * 100
-            volume_sum = sum(float(c[5]) for c in candles)
-
-            if price_change <= 1 or volume_sum < 500:
+            candles = BITVAVO.candles(symbol, "1m", {"limit": 15})
+            if not candles or len(candles) < 10:
                 continue
 
             if not get_volume_spike(candles):
                 continue
 
-            rsi = get_rsi(symbol)
-            if rsi >= level:
+            rsi = get_rsi(candles)
+            if rsi >= rsi_level:
                 continue
 
-            candidates.append((symbol, rsi, price_change))
+            price_change = (float(candles[-1][4]) - float(candles[0][4])) / float(candles[0][4]) * 100
 
-        except Exception as e:
-            print(f"⚠️ تحليل فشل لـ {symbol}: {e}")
+            candidates.append((symbol, rsi, price_change))
+        except:
             continue
 
     if not candidates:
         return None, None, None
 
-    candidates.sort(key=lambda x: x[1])
+    candidates.sort(key=lambda x: x[1])  # أقل RSI أولاً
     best = candidates[0]
-    return best[0], f"RSI={best[1]}, Change={best[2]}", best[2]
+    return best[0], f"RSI={best[1]}, Change={best[2]:.2f}%", best[2]
