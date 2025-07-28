@@ -1,6 +1,3 @@
-gunicorn
-flask
 requests
 websocket-client
-python-bitvavo-api
 redis
