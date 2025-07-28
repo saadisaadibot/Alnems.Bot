@@ -1,15 +1,22 @@
-import os
 import redis
+import os
+import json
 
-# الاتصال بقاعدة بيانات Redis
 r = redis.from_url(os.getenv("REDIS_URL"))
+TRADE_KEY = "bot:current_trade"
 
-# حفظ صفقة في الذاكرة
-def save_trade(symbol, entry_price, exit_price, reason, result, percent):
-    text = (
-        f"{symbol} | دخول: {round(entry_price, 4)} | "
-        f"خروج: {round(exit_price, 4)} | "
-        f"{result} ({round(percent, 2)}%) | سبب: {reason}"
-    )
-    r.lpush("nems:trades", text)
-    r.ltrim("nems:trades", 0, 49)  # يحتفظ بآخر 50 صفقة فقط
+def is_in_trade():
+    return r.exists(TRADE_KEY)
+
+def set_in_trade(symbol, price, amount):
+    data = {"symbol": symbol, "price": price, "amount": amount}
+    r.set(TRADE_KEY, json.dumps(data))
+
+def get_trade():
+    try:
+        return json.loads(r.get(TRADE_KEY))
+    except:
+        return None
+
+def clear_trade():
+    r.delete(TRADE_KEY)
