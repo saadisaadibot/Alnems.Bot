@@ -1,73 +1,89 @@
 import time
-import json
-import redis
-import os  # <–– هذا هو اللي ناقص
 from bitvavo_client.bitvavo import Bitvavo
-from indicators import get_rsi, get_volume_spike, get_bullish_candle
+import os
 
-r = redis.from_url(os.getenv("REDIS_URL"))
-bitvavo = Bitvavo({
-    'APIKEY': 'YOUR_API_KEY',
-    'APISECRET': 'YOUR_API_SECRET',
+BITVAVO = Bitvavo({
+    'APIKEY': os.getenv("BITVAVO_API_KEY"),
+    'APISECRET': os.getenv("BITVAVO_API_SECRET"),
     'RESTURL': 'https://api.bitvavo.com/v2',
     'WSURL': 'wss://ws.bitvavo.com/v2'
 })
 
-def get_symbols():
+def get_candles(symbol, interval="1m", limit=20):
     try:
-        raw = bitvavo.markets()
-        markets = json.loads(raw) if isinstance(raw, str) else raw
-        return [m['market'] for m in markets if isinstance(m, dict) and m.get('quote') == 'EUR']
-    except Exception as e:
-        print("❌ فشل جلب الرموز:", e)
-        return []
-
-def fetch_candles(symbol):
-    try:
-        candles = bitvavo.candles(symbol, '1m', {'limit': 20})
+        candles = BITVAVO.candles(symbol, interval, {"limit": limit})
         return candles
     except:
         return []
 
-def score_symbol(symbol, weights):
-    candles = fetch_candles(symbol)
+def get_rsi(candles, period=14):
+    if len(candles) < period + 1:
+        return 50
+    gains, losses = [], []
+    for i in range(-period, -1):
+        diff = float(candles[i][4]) - float(candles[i - 1][4])
+        if diff > 0:
+            gains.append(diff)
+        else:
+            losses.append(abs(diff))
+    avg_gain = sum(gains) / period if gains else 0.0001
+    avg_loss = sum(losses) / period if losses else 0.0001
+    rs = avg_gain / avg_loss
+    return 100 - (100 / (1 + rs))
+
+def get_volume_spike(candles, multiplier=2.0):
     if len(candles) < 6:
-        return 0, "لا يكفي شموع"
+        return False
+    volumes = [float(c[5]) for c in candles[:-1]]
+    avg_volume = sum(volumes) / len(volumes)
+    last_volume = float(candles[-1][5])
+    return last_volume > avg_volume * multiplier
 
-    signals = []
+def get_bullish_candle(prev_candle, curr_candle):
+    prev_close = float(prev_candle[4])
+    curr_open = float(curr_candle[1])
+    curr_close = float(curr_candle[4])
+    return curr_close > curr_open and curr_close > prev_close
 
-    # شرط 1: شمعة انعكاسية صاعدة
-    if get_bullish_candle(candles[-2], candles[-1]):
-        signals.append("شمعة انعكاسية")
+def meets_smart_conditions(candles):
+    if len(candles) < 15:
+        return False
 
-    # شرط 2: RSI منخفض
     rsi = get_rsi(candles)
-    if rsi < 35:
-        signals.append(f"RSI={int(rsi)}")
+    volume_ok = get_volume_spike(candles)
+    bullish = get_bullish_candle(candles[-2], candles[-1])
 
-    # شرط 3: فوليوم مفاجئ
-    if get_volume_spike(candles):
-        signals.append("فوليوم مرتفع")
-
-    score = sum(weights.get(s, 0) for s in signals)
-
-    reason = " + ".join(signals) if signals else "لا إشارات"
-
-    return score, reason
+    # استراتيجية تعليم ذاتي أولية: شروط سهلة
+    if rsi < 60 and volume_ok and bullish:
+        return True
+    return False
 
 def pick_best_symbol():
-    symbols = get_symbols()[:50]
-    weights = json.loads(r.get("nems:weights") or "{}")
+    symbols = []
+    try:
+        markets = BITVAVO.markets()
+        symbols = [m["market"] for m in markets if m["quote"] == "EUR" and "-" in m["market"]]
+    except:
+        return None, "خطأ تحميل الرموز", 0
 
+    best_score = 0
     best_symbol = None
-    best_score = -999
     best_reason = ""
 
     for symbol in symbols:
-        score, reason = score_symbol(symbol, weights)
-        if score > best_score:
-            best_score = score
-            best_symbol = symbol
-            best_reason = reason
+        candles = get_candles(symbol)
+        if not candles:
+            continue
 
-    return best_symbol, best_reason, best_score
+        if meets_smart_conditions(candles):
+            rsi = get_rsi(candles)
+            vol_ratio = float(candles[-1][5]) / (sum([float(c[5]) for c in candles[:-1]]) / len(candles[:-1]))
+            score = (100 - rsi) * vol_ratio
+            if score > best_score:
+                best_score = score
+                best_symbol = symbol
+                best_reason = f"RSI={round(rsi,1)} | Volume spike={round(vol_ratio,1)}"
+
+    if best_symbol:
+        return best_symbol, best_reason, best_score
+    return None, "لا يوجد فرصة قوية حالياً.", 0
