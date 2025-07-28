@@ -57,11 +57,12 @@ def buy(symbol):
     amount = round(BUY_AMOUNT_EUR / price, 6)
     try:
         order = BITVAVO.placeOrder({
-            "market": symbol,
-            "side": "buy",
-            "orderType": "market",
-            "amount": str(amount)
-        })
+    "market": symbol,
+    "side": "buy",
+    "orderType": "market",
+    "amount": str(amount),
+    "operatorId": ""  # ← هذا هو المفتاح اللي تقصده
+})
         filled = float(order.get("filledAmount", 0))
         executed_price = float(order.get("avgExecutionPrice", price))
 
