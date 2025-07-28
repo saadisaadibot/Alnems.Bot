@@ -116,10 +116,12 @@ def stop():
     r.set("sniper_running", "0")
     return "🛑 Bot stopped."
 
-@app.route("/trades")
-def trades():
-    history = r.lrange("trade_history", 0, 9)
-    return jsonify([t.decode() for t in history])
+@app.route("/", methods=["GET", "POST"])
+def index():
+    if request.method == "POST":
+        print("✅ Webhook received")
+        return jsonify({"status": "received"}), 200
+    return "Sniper bot is running."
 
 if __name__ == "__main__":
     threading.Thread(target=run_loop).start()
