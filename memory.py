@@ -3,7 +3,7 @@ import time
 import redis
 from datetime import datetime
 
-r = redis.from_url("YOUR_REDIS_URL")  # عدلها حسب مشروعك
+r = redis.from_url("YOUR_REDIS_URL")  # عدّل حسب مشروعك
 
 def save_trade(symbol, entry_price, exit_price, entry_reason, result, percent, source="تلقائي"):
     trade_data = {
@@ -18,6 +18,5 @@ def save_trade(symbol, entry_price, exit_price, entry_reason, result, percent, s
         "source": source
     }
 
-    # نخزن الصفقة في Redis ضمن قائمة
     trades_key = "nems:trades"
     r.rpush(trades_key, json.dumps(trade_data))
