@@ -3,29 +3,40 @@ import os
 import json
 
 r = redis.from_url(os.getenv("REDIS_URL"))
-TRADE_KEY = "bot:current_trade"
+
+TRADE_KEY = "last_trade"
+STATUS_KEY = "is_in_trade"
 RSI_KEY = "nems:rsi_level"
 
-def is_in_trade():
-    return r.exists(TRADE_KEY)
+def save_trade(symbol, price, side):
+    trade = {
+        "symbol": symbol,
+        "price": price,
+        "side": side
+    }
+    r.set(TRADE_KEY, json.dumps(trade))
 
-def set_in_trade(symbol, price, amount):
-    data = {"symbol": symbol, "price": price, "amount": amount}
-    r.set(TRADE_KEY, json.dumps(data))
-
-def get_trade():
-    try:
-        return json.loads(r.get(TRADE_KEY))
-    except:
+def get_last_trade():
+    data = r.get(TRADE_KEY)
+    if not data:
         return None
+    return json.loads(data)
+
+def is_in_trade():
+    return r.get(STATUS_KEY) == b"1"
+
+def set_in_trade():
+    r.set(STATUS_KEY, "1")
 
 def clear_trade():
-    r.delete(TRADE_KEY)
+    r.set(STATUS_KEY, "0")
 
-def adjust_rsi(result):
-    level = int(r.get(RSI_KEY) or 46)
-    if result == "ربح ✅":
-        level = max(level - 1, 30)
-    else:
-        level = min(level + 1, 70)
-    r.set(RSI_KEY, level)
+def adjust_rsi(outcome):
+    try:
+        current = int(r.get(RSI_KEY) or 46)
+        if outcome == "win" and current < 70:
+            r.set(RSI_KEY, current + 1)
+        elif outcome == "loss" and current > 30:
+            r.set(RSI_KEY, current - 1)
+    except:
+        pass
