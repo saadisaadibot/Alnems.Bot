@@ -1,8 +1,9 @@
 import os
 import redis
 from bitvavo_client.bitvavo import Bitvavo
-from utils import get_rsi
+from utils import get_rsi, get_volume_spike
 
+# الاتصال بـ Redis و Bitvavo
 r = redis.from_url(os.getenv("REDIS_URL"))
 
 BITVAVO = Bitvavo({
@@ -14,6 +15,7 @@ BITVAVO = Bitvavo({
 
 def pick_best_symbol():
     level = int(r.get("nems:rsi_level") or 46)
+
     try:
         markets = BITVAVO.markets()
     except:
@@ -27,21 +29,33 @@ def pick_best_symbol():
             continue
 
         try:
+            # شرط السعر + الفوليوم
             ticker = BITVAVO.ticker24h({"market": symbol})
             price_change = float(ticker.get("priceChangePercentage", 0))
             volume = float(ticker.get("volume", 0))
 
-            if price_change > 1 and volume > 1000:
-                rsi = get_rsi(symbol)
-                if rsi < level:
-                    candidates.append((symbol, rsi, price_change))
+            if price_change <= 1 or volume < 500:
+                continue
+
+            # جلب الشموع وتحليل الزخم
+            candles = BITVAVO.candles(symbol, "1m", {"limit": 10})
+            if not get_volume_spike(candles):
+                continue
+
+            # فحص RSI بعد التأكد من الزخم
+            rsi = get_rsi(symbol)
+            if rsi >= level:
+                continue
+
+            candidates.append((symbol, rsi, price_change))
+
         except:
             continue
 
     if not candidates:
         return None, None, None
 
-    # ترتيب حسب أقل RSI
+    # ترتيب حسب أقل RSI = فرصة ارتداد أقوى
     candidates.sort(key=lambda x: x[1])
     best = candidates[0]
     return best[0], f"RSI={best[1]}, Change={best[2]}", best[2]
