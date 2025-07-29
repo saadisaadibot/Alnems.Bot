@@ -6,7 +6,6 @@ import hashlib
 import redis
 import requests
 from flask import Flask, request
-from threading import Thread
 
 app = Flask(__name__)
 r = redis.from_url(os.getenv("REDIS_URL"))
@@ -38,7 +37,10 @@ def bitvavo_request(method, path, body=None):
     }
     url = f"https://api.bitvavo.com/v2{path}"
     response = requests.request(method, url, headers=headers, json=body)
-    return response.json()
+    try:
+        return response.json()
+    except:
+        return {"error": "❌ لم نستطع قراءة رد Bitvavo", "text": response.text}
 
 @app.route("/webhook", methods=["POST"])
 def webhook():
@@ -48,14 +50,17 @@ def webhook():
     if "/الرصيد" in msg:
         balances = bitvavo_request("GET", "/balance")
         text = "💰 رصيد الحساب:\n"
-        for b in balances:
-            if isinstance(b, dict):  # ✅ تأكيد أن العنصر b هو dict
-                asset = b.get("symbol") or b.get("currency") or "??"
-                available = b.get("available")
-                in_order = b.get("inOrder")
-                if float(available) > 0 or float(in_order) > 0:
-                    text += f"{asset}: متاح={available}, مجمّد={in_order}\n"
-    send_message(text)
+        if isinstance(balances, list):
+            for b in balances:
+                if isinstance(b, dict):
+                    asset = b.get("symbol") or b.get("currency") or "??"
+                    available = b.get("available", "0")
+                    in_order = b.get("inOrder", "0")
+                    if float(available) > 0 or float(in_order) > 0:
+                        text += f"{asset}: متاح={available}, مجمّد={in_order}\n"
+        else:
+            text += json.dumps(balances, indent=2, ensure_ascii=False)
+        send_message(text)
 
     elif "/اشتري" in msg:
         body = {
