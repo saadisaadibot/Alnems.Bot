@@ -52,8 +52,11 @@ def webhook():
             asset = b.get("symbol") or b.get("currency") or "??"
             available = b.get("available")
             in_order = b.get("inOrder")
-            if float(available) > 0 or float(in_order) > 0:
-                text += f"{asset}: متاح={available}, مجمّد={in_order}\n"
+            try:
+                if float(available or 0) > 0 or float(in_order or 0) > 0:
+                    text += f"{asset}: متاح={available}, مجمّد={in_order}\n"
+            except:
+                continue
         send_message(text)
 
     elif "/اشتري" in msg:
