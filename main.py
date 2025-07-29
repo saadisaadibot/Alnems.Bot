@@ -16,6 +16,7 @@ RSI_KEY = "nems:rsi_level"
 IS_RUNNING = "nems:is_running"
 IN_TRADE = "nems:is_in_trade"
 LAST_TRADE = "nems:last_trade"
+STATUS_KEY = "nems:status_message"
 
 def send(msg):
     try:
@@ -79,7 +80,12 @@ def trader():
             continue
 
         symbol, reason, rsi = pick_best_symbol()
-        if symbol:
+
+        if not symbol and reason:
+            r.set(STATUS_KEY, reason)
+        elif symbol:
+            r.set(STATUS_KEY, f"🚀 دخلت على {symbol}")
+
             order, entry_price = buy(symbol)
             if not order:
                 continue
@@ -129,7 +135,10 @@ def telegram_webhook():
     elif "/شو عم تعمل" in msg or "شو عم تعمل" in msg:
         is_running = r.get(IS_RUNNING)
         rsi = r.get(RSI_KEY)
-        msg = f"🔍 التشغيل: {'✅' if is_running == b'1' else '🛑'}\n🎯 RSI: {rsi.decode() if rsi else '؟'}"
+        status = r.get(STATUS_KEY)
+        msg = f"🔍 التشغيل: {'✅' if is_running == b'1' else '🛑'}\n"
+        msg += f"🎯 RSI: {rsi.decode() if rsi else '؟'}\n"
+        msg += f"📡 الحالة: {status.decode() if status else '🤐 لا يوجد إشعار'}"
         send(msg)
 
     elif "/الملخص" in msg:
