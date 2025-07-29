@@ -3,3 +3,4 @@ requests
 redis==4.5.5
 python-bitvavo-api
 numpy
+redis
