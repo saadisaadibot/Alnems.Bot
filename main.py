@@ -34,7 +34,9 @@ def fetch_price(symbol):
 def buy(symbol):
     price = fetch_price(symbol)
     if not price:
+        print("⚠️ فشل في جلب السعر الحالي")
         return None, None
+
     amount = round(BUY_AMOUNT_EUR / price, 6)
     body = {
         "market": symbol,
@@ -43,16 +45,23 @@ def buy(symbol):
         "amount": str(amount),
         "operatorId": ""
     }
+
     try:
+        print("🔍 أمر الشراء:", body)  # تتبع الأمر المرسل
         order = bitvavo_request("POST", "/order", body)
+        print("🧾 رد السيرفر:", order)  # تتبع الرد القادم
+
         filled = float(order.get("filledAmount", 0))
         executed_price = float(order.get("avgExecutionPrice", price))
+
         if filled == 0:
-            print(f"❌ أمر الشراء لـ {symbol} لم يُنفّذ فعليًا.")
+            print(f"❌ لم يتم تنفيذ أمر الشراء لـ {symbol} (filled = 0)")
             return None, None
+
         return order, executed_price
+
     except Exception as e:
-        print("❌ خطأ في الشراء:", e)
+        print("❌ خطأ في تنفيذ أمر الشراء:", e)
         return None, None
 
 def sell(symbol, amount):
