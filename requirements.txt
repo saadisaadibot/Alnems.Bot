@@ -1,5 +1,5 @@
 flask
-redis
 requests
-python-dotenv
-websocket-client
+redis
+bitvavo-client
+numpy
