@@ -43,5 +43,10 @@ def bitvavo_request(method, path, body):
         "Content-Type": "application/json"
     }
     url = f"https://api.bitvavo.com/v2{path}"
-    resp = requests.request(method, url, headers=headers, json=body)
+
+    if method in ["GET", "DELETE"]:
+        resp = requests.request(method, url, headers=headers)
+    else:
+        resp = requests.request(method, url, headers=headers, json=body)
+
     return resp.json()
