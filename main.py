@@ -48,6 +48,7 @@ def buy(symbol):
         filled = float(order.get("filledAmount", 0))
         executed_price = float(order.get("avgExecutionPrice", price))
         if filled == 0:
+            print(f"❌ أمر الشراء لـ {symbol} لم يُنفّذ فعليًا.")
             return None, None
         return order, executed_price
     except Exception as e:
@@ -84,12 +85,12 @@ def trader():
         if not symbol and reason:
             r.set(STATUS_KEY, reason)
         elif symbol:
-            r.set(STATUS_KEY, f"🚀 دخلت على {symbol}")
-
             order, entry_price = buy(symbol)
             if not order:
+                r.set(STATUS_KEY, f"❌ فشل تنفيذ أمر الشراء لـ {symbol}")
                 continue
 
+            r.set(STATUS_KEY, f"🚀 دخلت على {symbol}")
             r.set(IN_TRADE, "1")
             r.set(LAST_TRADE, f"{symbol}:{entry_price}")
             send(f"{symbol.split('-')[0]} 🤖")
@@ -100,6 +101,7 @@ def trader():
             sell_order = sell(symbol, amount)
             if not sell_order:
                 r.set(IN_TRADE, "0")
+                r.set(STATUS_KEY, f"⚠️ فشل البيع لـ {symbol}")
                 continue
 
             exit_price = float(sell_order.get("avgExecutionPrice", entry_price))
@@ -107,6 +109,7 @@ def trader():
             result = "ربح ✅" if percent >= 0 else "خسارة ❌"
             save_trade(symbol, entry_price, exit_price, reason, result, percent)
             send(f"{symbol.split('-')[0]} {percent:.2f}%")
+            r.set(STATUS_KEY, f"{result} من {symbol} بنسبة {percent:.2f}% ✅")
 
             r.set(IN_TRADE, "0")
 
