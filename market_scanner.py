@@ -15,7 +15,10 @@ def pick_best_symbol():
             continue
         rsi = calculate_rsi(candles)
         volume = sum(float(c[5]) for c in candles)
-        if rsi <= rsi_threshold and volume > 1000:
+        
+        print(f"{symbol} → RSI: {rsi:.1f}, Volume: {volume:.1f}")  # للمراقبة
+
+        if rsi <= rsi_threshold and volume > 100:
             return symbol, f"RSI={rsi:.1f}", rsi
 
     return None, None, None
