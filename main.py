@@ -37,19 +37,18 @@ def buy(symbol):
         print("⚠️ فشل في جلب السعر الحالي")
         return None, None
 
-    amount = round(BUY_AMOUNT_EUR / price, 6)
-    body = {
+    order_body = {
+        "amountQuote": str(BUY_AMOUNT_EUR),
         "market": symbol,
         "side": "buy",
         "orderType": "market",
-        "amount": str(amount),
         "operatorId": ""
     }
 
     try:
-        print("🔍 أمر الشراء:", body)  # تتبع الأمر المرسل
-        order = bitvavo_request("POST", "/order", body)
-        print("🧾 رد السيرفر:", order)  # تتبع الرد القادم
+        print("🔍 أمر الشراء:", order_body)
+        order = bitvavo_request("POST", "/order", order_body)
+        print("🧾 رد السيرفر:", order)
 
         filled = float(order.get("filledAmount", 0))
         executed_price = float(order.get("avgExecutionPrice", price))
