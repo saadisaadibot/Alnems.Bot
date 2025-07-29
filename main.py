@@ -46,18 +46,21 @@ def buy(symbol):
     }
 
     try:
-        print("🔍 أمر الشراء:", order_body)
-        order = bitvavo_request("POST", "/order", order_body)
-        print("🧾 رد السيرفر:", order)
+    print("🔍 أمر الشراء:", order_body)
+    order = bitvavo_request("POST", "/order", order_body)
+    print("🧾 رد السيرفر:", order)
 
-        filled = float(order.get("filledAmount", 0))
-        executed_price = float(order.get("avgExecutionPrice", price))
+    if "errorCode" in order:
+        print("❗️خطأ من Bitvavo:", order["errorCode"], "-", order.get("error"))
 
-        if filled == 0:
-            print(f"❌ لم يتم تنفيذ أمر الشراء لـ {symbol} (filled = 0)")
-            return None, None
+    filled = float(order.get("filledAmount", 0))
+    executed_price = float(order.get("avgExecutionPrice", price))
 
-        return order, executed_price
+    if filled == 0:
+        print(f"❌ لم يتم تنفيذ أمر الشراء لـ {symbol}")
+        return None, None
+
+    return order, executed_price
 
     except Exception as e:
         print("❌ خطأ في تنفيذ أمر الشراء:", e)
