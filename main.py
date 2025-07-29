@@ -47,6 +47,7 @@ def buy(symbol):
         filled = float(order.get("filledAmount", 0))
         executed_price = float(order.get("avgExecutionPrice", price))
         if filled == 0:
+            print("⚠️ لم يتم تنفيذ الشراء. الرد الكامل:", order)
             return None, None
         return order, executed_price
     except Exception as e:
