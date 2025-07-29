@@ -1,3 +1,4 @@
+import os
 import time
 import redis
 from utils import get_candles, calculate_rsi
