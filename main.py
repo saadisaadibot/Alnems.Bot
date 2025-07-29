@@ -88,6 +88,7 @@ def trader():
             order, entry_price = buy(symbol)
             if not order:
                 r.set(STATUS_KEY, f"❌ فشل تنفيذ أمر الشراء لـ {symbol}")
+                r.setex(f"nems:freeze:{symbol}", 300, "1")  # جمّدها لمدة 5 دقائق
                 continue
 
             r.set(STATUS_KEY, f"🚀 دخلت على {symbol}")
