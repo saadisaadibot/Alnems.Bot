@@ -1,84 +1,80 @@
-import os, time, json, requests, hmac, hashlib
+import os
+import json
+import time
+import hmac
+import hashlib
 import redis
+import requests
 from flask import Flask, request
+from threading import Thread
 
 app = Flask(__name__)
 r = redis.from_url(os.getenv("REDIS_URL"))
 
+BITVAVO_API_KEY = os.getenv("BITVAVO_API_KEY")
+BITVAVO_API_SECRET = os.getenv("BITVAVO_API_SECRET")
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 CHAT_ID = os.getenv("CHAT_ID")
-API_KEY = os.getenv("BITVAVO_API_KEY")
-API_SECRET = os.getenv("BITVAVO_API_SECRET")
-BUY_AMOUNT = float(os.getenv("BUY_AMOUNT_EUR", 5))
 
-def send(msg):
+def send_message(text):
     try:
-        requests.post(f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage",
-                      data={"chat_id": CHAT_ID, "text": msg})
+        requests.post(f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage", data={"chat_id": CHAT_ID, "text": text})
     except Exception as e:
-        print("❌ فشل الإرسال:", e)
+        print("❌ فشل إرسال التلغرام:", e)
 
-def create_signature(timestamp, method, path, body, secret):
-    body_str = json.dumps(body, separators=(',', ':'), ensure_ascii=False) if body else ""
-    message = f"{timestamp}{method}{path}{body_str}"
-    return hmac.new(secret.encode(), message.encode(), hashlib.sha256).hexdigest()
+def create_signature(timestamp, method, path, body):
+    body_str = "" if body is None else json.dumps(body, separators=(',', ':'), ensure_ascii=False)
+    msg = f"{timestamp}{method}{path}{body_str}"
+    return hmac.new(BITVAVO_API_SECRET.encode(), msg.encode(), hashlib.sha256).hexdigest()
 
 def bitvavo_request(method, path, body=None):
     timestamp = str(int(time.time() * 1000))
-    signature = create_signature(timestamp, method, path, body or {}, API_SECRET)
+    signature = create_signature(timestamp, method, path, body)
     headers = {
-        "Bitvavo-Access-Key": API_KEY,
+        "Bitvavo-Access-Key": BITVAVO_API_KEY,
         "Bitvavo-Access-Timestamp": timestamp,
         "Bitvavo-Access-Signature": signature,
         "Content-Type": "application/json"
     }
     url = f"https://api.bitvavo.com/v2{path}"
-    response = requests.request(method, url, headers=headers, json=body or {})
+    response = requests.request(method, url, headers=headers, json=body)
     return response.json()
 
 @app.route("/webhook", methods=["POST"])
-def telegram():
+def webhook():
     data = request.json
     msg = data.get("message", {}).get("text", "")
-    if not msg:
-        return "", 200
 
-    elif "/balance" in msg:
+    if "/الرصيد" in msg:
         balances = bitvavo_request("GET", "/balance")
-        text = ""
+        text = "💰 رصيد الحساب:\n"
         for b in balances:
-            asset = b.get("symbol") or b.get("currency")
-            available = float(b.get("available", 0))
-            if available > 0:
-                text += f"{asset}: {available}\n"
-        send("💰 الرصيد:\n" + (text or "لا يوجد رصيد."))
+            asset = b.get("symbol") or b.get("currency") or "??"
+            available = b.get("available")
+            in_order = b.get("inOrder")
+            if float(available) > 0 or float(in_order) > 0:
+                text += f"{asset}: متاح={available}, مجمّد={in_order}\n"
+        send_message(text)
 
-    elif "/buy_ada" in msg:
-        price_info = requests.get("https://api.bitvavo.com/v2/ticker/price?market=ADA-EUR").json()
-        price = float(price_info.get("price", 0))
-        amount = round(BUY_AMOUNT / price, 6)
+    elif "/اشتري" in msg:
         body = {
             "market": "ADA-EUR",
             "side": "buy",
             "orderType": "market",
-            "amount": str(amount),
-            "operatorId": ""
+            "amount": "10"
         }
         res = bitvavo_request("POST", "/order", body)
-        send(f"✅ أمر شراء ADA:\n{json.dumps(res, indent=2)}")
+        send_message(f"📥 أمر شراء:\n{json.dumps(res, indent=2, ensure_ascii=False)}")
 
-    elif "/sell_ada" in msg:
-        balances = bitvavo_request("GET", "/balance")
-        ada_balance = next((b["available"] for b in balances if b["symbol"] == "ADA"), "0")
+    elif "/بيع" in msg:
         body = {
             "market": "ADA-EUR",
             "side": "sell",
             "orderType": "market",
-            "amount": ada_balance,
-            "operatorId": ""
+            "amount": "10"
         }
         res = bitvavo_request("POST", "/order", body)
-        send(f"✅ أمر بيع ADA:\n{json.dumps(res, indent=2)}")
+        send_message(f"📤 أمر بيع:\n{json.dumps(res, indent=2, ensure_ascii=False)}")
 
     return "", 200
 
