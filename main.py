@@ -37,12 +37,13 @@ def buy(symbol):
 
     amount = round(BUY_AMOUNT_EUR / price, 6)
     try:
-        order = BITVAVO.placeOrder(
-            symbol,
-            "buy",
-            "market",
-            { "amount": str(amount) }
-        )
+        order = BITVAVO.placeOrder({
+            "market": symbol,
+            "side": "buy",
+            "orderType": "market",
+            "amount": str(amount),
+            "operatorId": "Oplaroti"
+        })
         return order, price
     except Exception as e:
         print("Buy Failed:", e)
