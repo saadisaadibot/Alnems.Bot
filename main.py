@@ -44,14 +44,14 @@ def telegram():
         return "", 200
 
     elif "/balance" in msg:
-    balances = bitvavo_request("GET", "/balance")
-    text = ""
-    for b in balances:
-        asset = b.get("symbol") or b.get("currency")  # ✅ إصلاح هنا
-        available = float(b.get("available", 0))
-        if available > 0:
-            text += f"{asset}: {available}\n"
-    send("💰 الرصيد:\n" + (text or "لا يوجد رصيد."))
+        balances = bitvavo_request("GET", "/balance")
+        text = ""
+        for b in balances:
+            asset = b.get("symbol") or b.get("currency")
+            available = float(b.get("available", 0))
+            if available > 0:
+                text += f"{asset}: {available}\n"
+        send("💰 الرصيد:\n" + (text or "لا يوجد رصيد."))
 
     elif "/buy_ada" in msg:
         price_info = requests.get("https://api.bitvavo.com/v2/ticker/price?market=ADA-EUR").json()
