@@ -40,7 +40,7 @@ def analyze_trend(candles):
     }
 
 def pick_best_symbol():
-    frozen = [k.decode().split(":")[-1] for k in r.scan_iter("nems:freeze:*")]
+    frozen = set(k.decode().split("nems:freeze:")[-1] for k in r.scan_iter("nems:freeze:*"))
     top = get_top_markets()
 
     for symbol in top:
