@@ -9,8 +9,6 @@ r = redis.from_url(os.getenv("REDIS_URL"))
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 CHAT_ID = os.getenv("CHAT_ID")
-BITVAVO_API_KEY = os.getenv("BITVAVO_API_KEY")
-BITVAVO_API_SECRET = os.getenv("BITVAVO_API_SECRET")
 BUY_AMOUNT_EUR = float(os.getenv("BUY_AMOUNT_EUR", 10))
 RSI_KEY = "nems:rsi_level"
 IS_RUNNING = "nems:is_running"
@@ -45,22 +43,27 @@ def buy(symbol):
         "operatorId": ""
     }
 
-try:
-    print("🔍 أمر الشراء:", order_body)
-    order = bitvavo_request("POST", "/order", order_body)
-    print("🧾 رد السيرفر:", order)
+    try:
+        print("🔍 أمر الشراء:", order_body)
+        order = bitvavo_request("POST", "/order", order_body)
+        print("🧾 رد السيرفر:", order)
 
-    if "errorCode" in order:
-        print("❗️خطأ من Bitvavo:", order["errorCode"], "-", order.get("error"))
+        if "errorCode" in order:
+            print("❗️خطأ من Bitvavo:", order["errorCode"], "-", order.get("error"))
+            return None, None
 
-    filled = float(order.get("filledAmount", 0))
-    executed_price = float(order.get("avgExecutionPrice", price))
+        filled = float(order.get("filledAmount", 0))
+        executed_price = float(order.get("avgExecutionPrice", price))
 
-    if filled == 0:
-        print(f"❌ لم يتم تنفيذ أمر الشراء لـ {symbol}")
+        if filled == 0:
+            print(f"❌ لم يتم تنفيذ أمر الشراء لـ {symbol}")
+            return None, None
+
+        return order, executed_price
+
+    except Exception as e:
+        print(f"🚨 استثناء أثناء تنفيذ أمر الشراء لـ {symbol}:", e)
         return None, None
-
-    return order, executed_price
 
 def sell(symbol, amount):
     body = {
@@ -104,7 +107,7 @@ def trader():
             order, entry_price = buy(symbol)
             if not order:
                 r.set(STATUS_KEY, f"❌ فشل تنفيذ أمر الشراء لـ {symbol}")
-                r.setex(f"nems:freeze:{symbol}", 300, "1")  # جمّدها لمدة 5 دقائق
+                r.setex(f"nems:freeze:{symbol}", 300, "1")  # تجميد العملة
                 continue
 
             r.set(STATUS_KEY, f"🚀 دخلت على {symbol}")
