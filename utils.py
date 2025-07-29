@@ -1,46 +1,31 @@
-def get_rsi(candles, period=14):
-    if len(candles) < period + 1:
-        return 50  # حيادي في حال البيانات ناقصة
+import requests
+import os
+import redis
+import numpy as np
 
-    closes = [float(c[4]) for c in candles]
-    gains = []
-    losses = []
-
-    for i in range(1, len(closes)):
-        diff = closes[i] - closes[i - 1]
-        if diff > 0:
-            gains.append(diff)
-        else:
-            losses.append(abs(diff))
-
-    avg_gain = sum(gains[-period:]) / period if gains else 0.0001
-    avg_loss = sum(losses[-period:]) / period if losses else 0.0001
-
-    rs = avg_gain / avg_loss
-    rsi = 100 - (100 / (1 + rs))
-    return round(rsi, 2)
-
-def get_volume_spike(candles, multiplier=1.5):
-    if len(candles) < 6:
-        return False
-    volumes = [float(c[5]) for c in candles[:-1]]
-    avg_volume = sum(volumes) / len(volumes)
-    last_volume = float(candles[-1][5])
-    return last_volume > avg_volume * multiplier
+BITVAVO_REST_URL = "https://api.bitvavo.com/v2"
 
 def fetch_price(symbol):
-    from bitvavo_client.bitvavo import Bitvavo
-    import os
-
-    bitvavo = Bitvavo({
-        'APIKEY': os.getenv("BITVAVO_API_KEY"),
-        'APISECRET': os.getenv("BITVAVO_API_SECRET"),
-        'RESTURL': 'https://api.bitvavo.com/v2',
-        'WSURL': 'wss://ws.bitvavo.com/v2'
-    })
-
     try:
-        price = bitvavo.tickerPrice({"market": symbol})
-        return float(price["price"])
+        res = requests.get(f"{BITVAVO_REST_URL}/ticker/price?market={symbol}")
+        return float(res.json()["price"])
     except:
         return None
+
+def get_candles(symbol, interval="1m", limit=15):
+    try:
+        url = f"{BITVAVO_REST_URL}/{symbol}/candles?interval={interval}&limit={limit}"
+        res = requests.get(url)
+        return res.json()
+    except:
+        return []
+
+def calculate_rsi(candles, period=14):
+    closes = [float(c[4]) for c in candles]
+    deltas = np.diff(closes)
+    seed = deltas[:period]
+    up = seed[seed > 0].sum() / period
+    down = -seed[seed < 0].sum() / period
+    rs = up / down if down else 0
+    rsi = 100 - (100 / (1 + rs))
+    return round(rsi, 2)
