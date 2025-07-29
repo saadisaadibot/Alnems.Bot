@@ -25,13 +25,15 @@ def calculate_rsi(candles, period=14):
     return 100 - (100 / (1 + rs))
 
 def create_signature(timestamp, method, path, body, secret):
-    body_str = json.dumps(body, separators=(',', ':')) if body else ""
+    body_str = "" if body is None else json.dumps(body, separators=(',', ':'), ensure_ascii=False)
     msg = f"{timestamp}{method}{path}{body_str}"
     return hmac.new(secret.encode(), msg.encode(), hashlib.sha256).hexdigest()
 
 def bitvavo_request(method, path, body):
     api_key = os.getenv("BITVAVO_API_KEY")
     api_secret = os.getenv("BITVAVO_API_SECRET")
+    if body is None:
+        body = {}
     timestamp = str(int(time.time() * 1000))
     signature = create_signature(timestamp, method, path, body, api_secret)
     headers = {
