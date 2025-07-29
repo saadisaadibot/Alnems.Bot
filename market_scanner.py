@@ -40,15 +40,20 @@ def analyze_trend(candles):
     }
 
 def pick_best_symbol():
+    frozen = [k.decode().split(":")[-1] for k in r.scan_iter("nems:freeze:*")]
     top = get_top_markets()
+
     for symbol in top:
+        if symbol in frozen:
+            continue  # العملة مجمّدة مؤقتًا بسبب فشل شراء
+
         try:
             candles = get_candles(symbol, interval="1m", limit=60)
             if len(candles) < 30:
                 continue
 
             trend = analyze_trend(candles)
-            confidence = float(r.hget(FAKE_MEMORY, symbol) or 1.0)
+            confidence = float(r.hget("nems:confidence", symbol) or 1.0)
 
             pos = trend["position"]
             wave = trend["wave"]
@@ -60,7 +65,7 @@ def pick_best_symbol():
                     reason = f"📈 {symbol} Pos={pos}%, Slope={slope}%, Vol={volatility}%"
                     return symbol, reason, trend
             elif pos < 25 and confidence >= 1.5:
-                continue  # راقب
+                continue  # راقب فقط
 
         except Exception as e:
             continue
