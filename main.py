@@ -18,7 +18,8 @@ LAST_TRADE = "nems:last_trade"
 def send(msg):
     try:
         requests.post(f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage", data={"chat_id": CHAT_ID, "text": msg})
-    except: pass
+    except Exception as e:
+        print("📡 فشل إرسال التلغرام:", e)
 
 def fetch_price(symbol):
     try:
@@ -104,66 +105,38 @@ def trader():
         time.sleep(15)
 
 @app.route("/webhook", methods=["POST"])
-def webhook():
-    data = request.json
-    msg = data.get("message", {}).get("text", "")
-    if not msg:
-        return "", 200
-
-    if "/play" in msg:
-        r.set(IS_RUNNING, "1")
-        send("✅ النمس بدأ التشغيل")
-
-    elif "/stop" in msg:
-        r.set(IS_RUNNING, "0")
-        send("🛑 تم إيقاف النمس")
-
-    elif "/reset" in msg:
-        r.set(IN_TRADE, "0")
-        r.delete(LAST_TRADE)
-        send("🔄 تمت إعادة التهيئة")
-
-    elif "/شو عم تعمل" in msg:
-        is_running = r.get(IS_RUNNING)
-        rsi = r.get(RSI_KEY)
-        msg = f"🔍 التشغيل: {'✅' if is_running == b'1' else '❌'}\n📈 RSI: {rsi.decode() if rsi else '??'}"
-        send(msg)
-
-    elif "/الملخص" in msg:
-        trades = r.lrange("nems:trades", 0, 9)
-        text = "🧾 آخر 10 صفقات:\n" + "\n".join([t.decode() for t in trades])
-        send(text)
-
-    return "", 200
-@app.route("/webhook", methods=["POST"])
 def telegram_webhook():
     data = request.json
     msg = data.get("message", {}).get("text", "")
     if not msg:
         return "", 200
 
-    # الأوامر مثل /play و /stop و /الملخص
     if "/play" in msg:
         r.set(IS_RUNNING, "1")
         send("✅ النمس بدأ التشغيل")
+
     elif "/stop" in msg:
         r.set(IS_RUNNING, "0")
         send("🛑 تم إيقاف النمس")
+
     elif "/reset" in msg:
         r.set(IN_TRADE, "0")
         r.delete(LAST_TRADE)
         send("🔄 تمت إعادة التهيئة")
-    elif "شو عم تعمل" in msg:
+
+    elif "/شو عم تعمل" in msg or "شو عم تعمل" in msg:
         is_running = r.get(IS_RUNNING)
         rsi = r.get(RSI_KEY)
         msg = f"🔍 التشغيل: {'✅' if is_running == b'1' else '🛑'}\n🎯 RSI: {rsi.decode() if rsi else '؟'}"
         send(msg)
+
     elif "/الملخص" in msg:
         trades = r.lrange("nems:trades", 0, 9)
         text = "🧾 آخر 10 صفقات:\n\n" + "\n".join([t.decode() for t in trades])
         send(text)
 
     return "", 200
+
 if __name__ == "__main__":
     threading.Thread(target=trader).start()
     app.run(host="0.0.0.0", port=8000)
