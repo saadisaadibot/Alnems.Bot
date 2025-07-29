@@ -45,7 +45,7 @@ def buy(symbol):
         "operatorId": ""
     }
 
-    try:
+try:
     print("🔍 أمر الشراء:", order_body)
     order = bitvavo_request("POST", "/order", order_body)
     print("🧾 رد السيرفر:", order)
@@ -61,10 +61,6 @@ def buy(symbol):
         return None, None
 
     return order, executed_price
-
-    except Exception as e:
-        print("❌ خطأ في تنفيذ أمر الشراء:", e)
-        return None, None
 
 def sell(symbol, amount):
     body = {
