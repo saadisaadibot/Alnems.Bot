@@ -70,11 +70,20 @@ def sell(symbol, amount):
         "amount": str(amount),
         "operatorId": ""
     }
+
     try:
+        print("🔁 أمر البيع:", body)
         order = bitvavo_request("POST", "/order", body)
+        print("📤 رد السيرفر:", order)
+
+        if "errorCode" in order:
+            print("❗️خطأ من Bitvavo:", order["errorCode"], "-", order.get("error"))
+            return None
+
         return order
+
     except Exception as e:
-        print("❌ خطأ في البيع:", e)
+        print("❌ فشل تنفيذ البيع:", e)
         return None
 
 def trader():
