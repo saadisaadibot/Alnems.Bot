@@ -1,38 +1,29 @@
 import os
+import json
 import time
 import hmac
 import hashlib
-import json
 import requests
 
-# تحميل المفاتيح من environment
 BITVAVO_API_KEY = os.getenv("BITVAVO_API_KEY")
 BITVAVO_API_SECRET = os.getenv("BITVAVO_API_SECRET")
-BASE_URL = "https://api.bitvavo.com/v2"
 
-def bitvavo_signed_get(path):
+def bitvavo_request(method, path, body=None):
     timestamp = str(int(time.time() * 1000))
-    method = "GET"
-    body = ""
-    message = f"{timestamp}{method}{path}{body}"
+    body_str = json.dumps(body, separators=(',', ':')) if body else ""
+    message = f"{timestamp}{method}{path}{body_str}"
     signature = hmac.new(BITVAVO_API_SECRET.encode(), message.encode(), hashlib.sha256).hexdigest()
 
     headers = {
-        "Bitvavo-Access-Key": BITVAVO_API_KEY,
-        "Bitvavo-Access-Signature": signature,
-        "Bitvavo-Access-Timestamp": timestamp,
-        "Bitvavo-Access-Window": "10000"
+        'Bitvavo-Access-Key': BITVAVO_API_KEY,
+        'Bitvavo-Access-Signature': signature,
+        'Bitvavo-Access-Timestamp': timestamp,
+        'Bitvavo-Access-Window': '10000',
+        'Content-Type': 'application/json'
     }
 
-    url = BASE_URL + path
-    response = requests.get(url, headers=headers)
-    return response.status_code, response.json()
+    url = "https://api.bitvavo.com/v2" + path
+    return requests.request(method, url, headers=headers, data=body_str).json()
 
-if __name__ == "__main__":
-    print("🧪 فحص المفاتيح ...")
-    print("🔑 KEY:", BITVAVO_API_KEY[:6], "...")
-
-    status, result = bitvavo_signed_get("/account")
-
-    print(f"\n📡 Status Code: {status}")
-    print("📦 الرد الكامل:\n", json.dumps(result, indent=2, ensure_ascii=False))
+# Test
+print(bitvavo_request("GET", "/balance"))
