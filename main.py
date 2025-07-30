@@ -5,14 +5,18 @@ import hmac
 import hashlib
 import requests
 
+# إعداد المفاتيح من البيئة
 BITVAVO_API_KEY = os.getenv("BITVAVO_API_KEY")
 BITVAVO_API_SECRET = os.getenv("BITVAVO_API_SECRET")
+
+def create_signature(timestamp, method, path, body_str):
+    message = f"{timestamp}{method}/v2{path}{body_str}"
+    return hmac.new(BITVAVO_API_SECRET.encode(), message.encode(), hashlib.sha256).hexdigest()
 
 def bitvavo_request(method, path, body=None):
     timestamp = str(int(time.time() * 1000))
     body_str = json.dumps(body, separators=(',', ':')) if body else ""
-    message = f"{timestamp}{method}/v2{path}{body_str}"  # ✅ التصحيح هنا
-    signature = hmac.new(BITVAVO_API_SECRET.encode(), message.encode(), hashlib.sha256).hexdigest()
+    signature = create_signature(timestamp, method, path, body_str)
 
     headers = {
         'Bitvavo-Access-Key': BITVAVO_API_KEY,
@@ -23,4 +27,43 @@ def bitvavo_request(method, path, body=None):
     }
 
     url = "https://api.bitvavo.com/v2" + path
-    return requests.request(method, url, headers=headers, data=body_str).json()
+    response = requests.request(method, url, headers=headers, data=body_str)
+    try:
+        return response.json()
+    except:
+        return {"error": "Invalid JSON", "text": response.text}
+
+# اقرأ الرصيد
+print("👛 الرصيد:")
+print(bitvavo_request("GET", "/balance"))
+
+# اشتري ADA بقيمة 10 يورو
+print("\n🟢 شراء ADA:")
+buy_response = bitvavo_request("POST", "/order", {
+    "market": "ADA-EUR",
+    "side": "buy",
+    "orderType": "market",
+    "amountQuote": "10"
+})
+print(buy_response)
+
+# انتظر 5 ثواني
+time.sleep(5)
+
+# احصل على الكمية المشتراة
+balance = bitvavo_request("GET", "/balance")
+ada = next((item for item in balance if item["symbol"] == "ADA"), None)
+ada_amount = ada["available"] if ada else "0"
+
+# بيع ADA إذا وُجدت كمية
+if float(ada_amount) > 0:
+    print("\n🔴 بيع ADA:")
+    sell_response = bitvavo_request("POST", "/order", {
+        "market": "ADA-EUR",
+        "side": "sell",
+        "orderType": "market",
+        "amount": ada_amount
+    })
+    print(sell_response)
+else:
+    print("\n⚠️ لا توجد كمية ADA متاحة للبيع.")
