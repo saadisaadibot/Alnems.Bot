@@ -4,6 +4,7 @@ import time
 import hmac
 import hashlib
 import requests
+import uuid
 
 # إعداد المفاتيح من البيئة
 BITVAVO_API_KEY = os.getenv("BITVAVO_API_KEY")
@@ -34,16 +35,18 @@ def bitvavo_request(method, path, body=None):
         return {"error": "Invalid JSON", "text": response.text}
 
 # اقرأ الرصيد
-print("👛 الرصيد:")
+print("🐷 الرصيد:")
 print(bitvavo_request("GET", "/balance"))
 
 # اشتري ADA بقيمة 10 يورو
 print("\n🟢 شراء ADA:")
+operator_id = str(uuid.uuid4())[:12]
 buy_response = bitvavo_request("POST", "/order", {
     "market": "ADA-EUR",
     "side": "buy",
     "orderType": "market",
-    "amountQuote": "10"
+    "amountQuote": "10",
+    "operatorId": operator_id
 })
 print(buy_response)
 
@@ -58,11 +61,13 @@ ada_amount = ada["available"] if ada else "0"
 # بيع ADA إذا وُجدت كمية
 if float(ada_amount) > 0:
     print("\n🔴 بيع ADA:")
+    operator_id = str(uuid.uuid4())[:12]
     sell_response = bitvavo_request("POST", "/order", {
         "market": "ADA-EUR",
         "side": "sell",
         "orderType": "market",
-        "amount": ada_amount
+        "amount": ada_amount,
+        "operatorId": operator_id
     })
     print(sell_response)
 else:
