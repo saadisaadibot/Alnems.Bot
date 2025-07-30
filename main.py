@@ -6,7 +6,6 @@ from utils import create_signature
 
 app = Flask(__name__)
 
-# متغيرات البيئة
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 CHAT_ID = os.getenv("CHAT_ID")
 BITVAVO_API_KEY = os.getenv("BITVAVO_API_KEY")
@@ -17,15 +16,16 @@ TRADE_STATUS_KEY = "nems:is_in_trade"
 STATUS_MESSAGE_KEY = "nems:status_message"
 LOCK_KEY = "nems:lock"
 
-# إرسال رسالة تلغرام
+# ------------------ Telegram Message ------------------
 def send_message(text):
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
     data = {"chat_id": CHAT_ID, "text": text}
     try:
         requests.post(url, data=data)
-    except: pass
+    except:
+        pass
 
-# تنفيذ طلب Bitvavo موقّع
+# ------------------ Bitvavo Request ------------------
 def bitvavo_request(method, path, body=None):
     timestamp = str(int(time.time() * 1000))
     body_str = json.dumps(body) if body else ""
@@ -42,7 +42,7 @@ def bitvavo_request(method, path, body=None):
     response = requests.request(method, url, headers=headers, json=body)
     return response.json()
 
-# شراء عملة
+# ------------------ BUY ------------------
 def buy(symbol):
     try:
         resp = bitvavo_request("POST", "/order", {
@@ -50,18 +50,19 @@ def buy(symbol):
             "side": "buy",
             "orderType": "market",
             "amount": str(BUY_AMOUNT_EUR),
+            "operatorId": "nems_pro"
         })
         if "id" in resp:
             return resp
         else:
             send_message(f"🚫 فشل الشراء: {resp}")
-            r.setex(f"{LOCK_KEY}:{symbol}", 1800, "1")  # تجميد العملة 30 دقيقة
+            r.setex(f"{LOCK_KEY}:{symbol}", 1800, "1")  # حظر العملة 30 دقيقة
             return None
     except Exception as e:
         send_message(f"🚫 خطأ أثناء الشراء: {e}")
         return None
 
-# بيع العملة
+# ------------------ SELL ------------------
 def sell(symbol, amount):
     try:
         resp = bitvavo_request("POST", "/order", {
@@ -69,13 +70,14 @@ def sell(symbol, amount):
             "side": "sell",
             "orderType": "market",
             "amount": str(amount),
+            "operatorId": "nems_pro"
         })
         return resp
     except Exception as e:
         send_message(f"🚫 خطأ أثناء البيع: {e}")
         return None
 
-# جلب الرصيد
+# ------------------ BALANCE ------------------
 def get_balance(symbol):
     try:
         data = bitvavo_request("GET", "/balance", None)
@@ -86,7 +88,7 @@ def get_balance(symbol):
     except:
         return 0
 
-# المنطق الرئيسي
+# ------------------ TRADER LOGIC ------------------
 def trader():
     while True:
         if r.get("nems:running") != b"1":
@@ -119,7 +121,7 @@ def trader():
         r.set(TRADE_STATUS_KEY, "1")
         send_message(f"📈 تم شراء {symbol} بسعر {entry_price:.4f}€\nسبب الدخول: {reason}")
 
-        time.sleep(30)
+        time.sleep(30)  # الانتظار قبل البيع
 
         amount = get_balance(symbol)
         sell_result = sell(symbol, amount)
@@ -133,8 +135,7 @@ def trader():
         send_message(f"{result} تم بيع {symbol} بسعر {exit_price:.4f}€\nالربح: {percent:.2f}%")
         time.sleep(5)
 
-# ----------------- TELEGRAM -----------------
-
+# ------------------ TELEGRAM ------------------
 @app.route("/webhook", methods=["POST"])
 def telegram_webhook():
     data = request.json
@@ -153,8 +154,11 @@ def telegram_webhook():
         r.set(TRADE_STATUS_KEY, "0")
         send_message("🔄 تم تصفير حالة الصفقة.")
     elif text == "/شو_عم_تعمل":
-        msg = r.get(STATUS_MESSAGE_KEY) or b"غير معروف"
-        send_message(f"🤖 الحالة: {msg.decode()}")
+        msg = r.get(STATUS_MESSAGE_KEY)
+        if msg:
+            send_message(f"🤖 الحالة: {msg.decode()}")
+        else:
+            send_message("🤖 الحالة: غير معروف")
     elif text == "/trades":
         trades = r.lrange("nems:trades", 0, 9)
         if not trades:
@@ -171,8 +175,7 @@ def telegram_webhook():
         send_message(f"📊 RSI الحالي: {level.decode()}\n📁 عدد الصفقات: {count}")
     return "ok"
 
-# ----------------- START -----------------
-
+# ------------------ RUN ------------------
 if __name__ == "__main__":
     threading.Thread(target=trader).start()
     app.run(host="0.0.0.0", port=10000)
