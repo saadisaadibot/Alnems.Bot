@@ -40,18 +40,20 @@ def send_message(text):
     except Exception as e:
         print("Send message error:", e)
 
-# المسار الرئيسي للويب هوك
-@app.route("/webhook", methods=["POST"])
+# المسار الرئيسي للويب @app.route("/webhook", methods=["POST"])
 def webhook():
     data = request.json
-
-    if not data:
-        return "No data", 400
+    print("📩 Received Telegram data:", data)  # 🧪 أطبع المحتوى الكامل
 
     message_obj = data.get("message", {})
     message = message_obj.get("text", "").strip()
+
     if not message:
         return "No message", 200
+
+    send_message("✅ تم استلام الأمر: " + message)
+
+    ...
 
     # أوامر تلغرام
     if "رصيد" in message:
