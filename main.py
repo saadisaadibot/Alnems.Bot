@@ -1,15 +1,14 @@
-import os, time, redis, threading, requests, json, hmac, hashlib
+import os, time, redis, threading, requests
 from flask import Flask, request
 from market_scanner import pick_best_symbol
 from memory import save_trade
+from utils import bitvavo_request
 
 app = Flask(__name__)
 r = redis.from_url(os.getenv("REDIS_URL"))
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 CHAT_ID = os.getenv("CHAT_ID")
-BITVAVO_API_KEY = os.getenv("BITVAVO_API_KEY")
-BITVAVO_API_SECRET = os.getenv("BITVAVO_API_SECRET")
 BUY_AMOUNT_EUR = float(os.getenv("BUY_AMOUNT_EUR", 10))
 
 RSI_KEY = "nems:rsi_level"
@@ -17,28 +16,6 @@ IS_RUNNING = "nems:is_running"
 IN_TRADE = "nems:is_in_trade"
 LAST_TRADE = "nems:last_trade"
 STATUS_KEY = "nems:status_message"
-
-# ✅ توقيع صحيح ومضمون
-def bitvavo_request(method, path, body=None):
-    timestamp = str(int(time.time() * 1000))
-    body_str = json.dumps(body, separators=(',', ':')) if body else ""
-    msg = f"{timestamp}{method}{path}{body_str}"
-    signature = hmac.new(BITVAVO_API_SECRET.encode(), msg.encode(), hashlib.sha256).hexdigest()
-
-    headers = {
-        "Bitvavo-Access-Key": BITVAVO_API_KEY,
-        "Bitvavo-Access-Signature": signature,
-        "Bitvavo-Access-Timestamp": timestamp,
-        "Bitvavo-Access-Window": "10000",
-        "Content-Type": "application/json"
-    }
-
-    url = f"https://api.bitvavo.com/v2{path}"
-
-    if method == "GET":
-        return requests.get(url, headers=headers).json()
-    elif method == "POST":
-        return requests.post(url, headers=headers, json=body).json()
 
 def send(msg):
     try:
@@ -49,14 +26,19 @@ def send(msg):
 def fetch_price(symbol):
     try:
         res = requests.get(f"https://api.bitvavo.com/v2/ticker/price?market={symbol}")
-        return float(res.json().get("price"))
-    except:
+        price = float(res.json().get("price"))
+        print(f"📈 السعر الحالي لـ {symbol}: {price}")
+        return price
+    except Exception as e:
+        print(f"❌ فشل جلب السعر لـ {symbol}:", e)
         return None
 
 def buy(symbol):
     price = fetch_price(symbol)
     if not price:
+        print("❌ فشل في جلب السعر.")
         return None, None
+
     amount = round(BUY_AMOUNT_EUR / price, 6)
     body = {
         "market": symbol,
@@ -65,16 +47,25 @@ def buy(symbol):
         "amount": str(amount),
         "operatorId": ""
     }
+
+    print(f"🛒 طلب شراء {symbol}: {body}")
     try:
         order = bitvavo_request("POST", "/order", body)
+        print("📦 رد الشراء:", order)
+
         filled = float(order.get("filledAmount", 0))
         executed_price = float(order.get("avgExecutionPrice", price))
+
         if filled == 0:
-            print("⚠️ لم يتم تنفيذ الشراء. الرد الكامل:", order)
+            print("⚠️ لم يتم تنفيذ الشراء. الرد:", order)
+            send(f"⚠️ فشل تنفيذ الشراء على {symbol}\n{order}")
             return None, None
+
         return order, executed_price
+
     except Exception as e:
-        print("❌ خطأ في الشراء:", e)
+        print("❌ استثناء في الشراء:", e)
+        send(f"❌ خطأ في الشراء: {e}")
         return None, None
 
 def sell(symbol, amount):
@@ -85,11 +76,14 @@ def sell(symbol, amount):
         "amount": str(amount),
         "operatorId": ""
     }
+    print(f"💰 طلب بيع {symbol}: {body}")
     try:
         order = bitvavo_request("POST", "/order", body)
+        print("📦 رد البيع:", order)
         return order
     except Exception as e:
-        print("❌ خطأ في البيع:", e)
+        print("❌ استثناء في البيع:", e)
+        send(f"❌ خطأ في البيع: {e}")
         return None
 
 def trader():
@@ -106,15 +100,23 @@ def trader():
 
         if not symbol and reason:
             r.set(STATUS_KEY, reason)
+            print("📭 لم يتم اختيار عملة. السبب:", reason)
+
         elif symbol:
-            r.set(STATUS_KEY, f"🚀 دخلت على {symbol}")
+            print(f"🚀 تم اختيار {symbol}")
+            r.set(STATUS_KEY, f"🚀 محاولة دخول على {symbol}")
+
             order, entry_price = buy(symbol)
             if not order:
+                r.set(STATUS_KEY, f"❌ فشل الشراء على {symbol}")
+                print(f"❌ فشل شراء {symbol}")
                 continue
 
+            print(f"✅ شراء ناجح لـ {symbol} بسعر {entry_price}")
+            r.set(STATUS_KEY, f"✅ شراء ناجح على {symbol}")
             r.set(IN_TRADE, "1")
             r.set(LAST_TRADE, f"{symbol}:{entry_price}")
-            send(f"{symbol.split('-')[0]} 🤖")
+            send(f"✅ شراء {symbol} 🤖")
 
             time.sleep(90)
 
@@ -127,6 +129,8 @@ def trader():
             exit_price = float(sell_order.get("avgExecutionPrice", entry_price))
             percent = ((exit_price - entry_price) / entry_price) * 100
             result = "ربح ✅" if percent >= 0 else "خسارة ❌"
+            print(f"🔁 نتيجة الصفقة: {result} بنسبة {percent:.2f}%")
+
             save_trade(symbol, entry_price, exit_price, reason, result, percent)
             send(f"{symbol.split('-')[0]} {percent:.2f}%")
 
