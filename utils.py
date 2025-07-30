@@ -29,24 +29,31 @@ def create_signature(timestamp, method, path, body, secret):
     msg = f"{timestamp}{method}{path}{body_str}"
     return hmac.new(secret.encode(), msg.encode(), hashlib.sha256).hexdigest()
 
-def bitvavo_request(method, path, body):
-    api_key = os.getenv("BITVAVO_API_KEY")
-    api_secret = os.getenv("BITVAVO_API_SECRET")
-    if body is None:
-        body = {}
+import hmac
+import hashlib
+import time
+import json
+import requests
+import os
+
+BITVAVO_API_KEY = os.getenv("BITVAVO_API_KEY")
+BITVAVO_API_SECRET = os.getenv("BITVAVO_API_SECRET")
+BASE_URL = "https://api.bitvavo.com/v2"
+
+def bitvavo_request(method, path, body=None):
     timestamp = str(int(time.time() * 1000))
-    signature = create_signature(timestamp, method, path, body, api_secret)
+    body_str = json.dumps(body, separators=(',', ':')) if body else ''
+    message = f"{timestamp}{method}{path}{body_str}"
+    signature = hmac.new(BITVAVO_API_SECRET.encode(), message.encode(), hashlib.sha256).hexdigest()
+
     headers = {
-        "Bitvavo-Access-Key": api_key,
-        "Bitvavo-Access-Timestamp": timestamp,
-        "Bitvavo-Access-Signature": signature,
-        "Content-Type": "application/json"
+        'Bitvavo-Access-Key': BITVAVO_API_KEY,
+        'Bitvavo-Access-Signature': signature,
+        'Bitvavo-Access-Timestamp': timestamp,
+        'Bitvavo-Access-Window': '10000',
+        'Content-Type': 'application/json'
     }
-    url = f"https://api.bitvavo.com/v2{path}"
 
-    if method in ["GET", "DELETE"]:
-        resp = requests.request(method, url, headers=headers)
-    else:
-        resp = requests.request(method, url, headers=headers, json=body)
-
-    return resp.json()
+    url = BASE_URL + path
+    response = requests.request(method, url, headers=headers, data=body_str)
+    return response.json()
