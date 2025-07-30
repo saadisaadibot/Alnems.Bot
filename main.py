@@ -11,7 +11,7 @@ BITVAVO_API_SECRET = os.getenv("BITVAVO_API_SECRET")
 def bitvavo_request(method, path, body=None):
     timestamp = str(int(time.time() * 1000))
     body_str = json.dumps(body, separators=(',', ':')) if body else ""
-    message = f"{timestamp}{method}{path}{body_str}"
+    message = f"{timestamp}{method}/v2{path}{body_str}"  # ✅ التصحيح هنا
     signature = hmac.new(BITVAVO_API_SECRET.encode(), message.encode(), hashlib.sha256).hexdigest()
 
     headers = {
@@ -24,6 +24,3 @@ def bitvavo_request(method, path, body=None):
 
     url = "https://api.bitvavo.com/v2" + path
     return requests.request(method, url, headers=headers, data=body_str).json()
-
-# Test
-print(bitvavo_request("GET", "/balance"))
