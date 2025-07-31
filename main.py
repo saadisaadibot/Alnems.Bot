@@ -1,181 +1,40 @@
-import os, time, redis, threading, requests
-from flask import Flask, request
-from market_scanner import pick_best_symbol
-from memory import save_trade
-from utils import bitvavo_request
+import os
+import time
+import hmac
+import json
+import hashlib
+import requests
 
-app = Flask(__name__)
-r = redis.from_url(os.getenv("REDIS_URL"))
+# ضع المفاتيح مباشرة أو استخدم متغيرات بيئة
+BITVAVO_API_KEY = os.getenv("BITVAVO_API_KEY") or "حط_المفتاح_هون"
+BITVAVO_API_SECRET = os.getenv("BITVAVO_API_SECRET") or "حط_السر_هون"
 
-BOT_TOKEN = os.getenv("BOT_TOKEN")
-CHAT_ID = os.getenv("CHAT_ID")
-BUY_AMOUNT_EUR = float(os.getenv("BUY_AMOUNT_EUR", 10))
+def bitvavo_request(method, path, body=None):
+    timestamp = str(int(time.time() * 1000))
+    body_str = json.dumps(body, separators=(',', ':'), ensure_ascii=False) if body else ""
+    msg = f"{timestamp}{method}{path}{body_str}"
+    signature = hmac.new(BITVAVO_API_SECRET.encode(), msg.encode(), hashlib.sha256).hexdigest()
 
-RSI_KEY = "nems:rsi_level"
-IS_RUNNING = "nems:is_running"
-IN_TRADE = "nems:is_in_trade"
-LAST_TRADE = "nems:last_trade"
-STATUS_KEY = "nems:status_message"
-
-def send(msg):
-    try:
-        requests.post(f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage", data={"chat_id": CHAT_ID, "text": msg})
-    except Exception as e:
-        print("📡 فشل إرسال التلغرام:", e)
-
-def fetch_price(symbol):
-    try:
-        res = requests.get(f"https://api.bitvavo.com/v2/ticker/price?market={symbol}")
-        price = float(res.json().get("price"))
-        print(f"📈 السعر الحالي لـ {symbol}: {price}")
-        return price
-    except Exception as e:
-        print(f"❌ فشل جلب السعر لـ {symbol}:", e)
-        return None
-
-def buy(symbol):
-    price = fetch_price(symbol)
-    if not price:
-        print("❌ فشل في جلب السعر.")
-        return None, None
-
-    amount = round(BUY_AMOUNT_EUR / price, 6)
-    body = {
-        "market": symbol,
-        "side": "buy",
-        "orderType": "market",
-        "amount": str(amount),
-        "operatorId": ""
+    headers = {
+        "Bitvavo-Access-Key": BITVAVO_API_KEY,
+        "Bitvavo-Access-Signature": signature,
+        "Bitvavo-Access-Timestamp": timestamp,
+        "Bitvavo-Access-Window": "10000",
+        "Content-Type": "application/json"
     }
 
-    print(f"🛒 طلب شراء {symbol}: {body}")
+    url = "https://api.bitvavo.com/v2" + path
+
+    if method == "GET":
+        response = requests.get(url, headers=headers)
+    else:
+        response = requests.post(url, headers=headers, data=body_str.encode("utf-8"))
+
     try:
-        order = bitvavo_request("POST", "/order", body)
-        print("📦 رد الشراء:", order)
-
-        filled = float(order.get("filledAmount", 0))
-        executed_price = float(order.get("avgExecutionPrice", price))
-
-        if filled == 0:
-            print("⚠️ لم يتم تنفيذ الشراء. الرد:", order)
-            send(f"⚠️ فشل تنفيذ الشراء على {symbol}\n{order}")
-            return None, None
-
-        return order, executed_price
-
+        return response.json()
     except Exception as e:
-        print("❌ استثناء في الشراء:", e)
-        send(f"❌ خطأ في الشراء: {e}")
-        return None, None
+        return {"error": f"Failed to decode JSON: {e}", "raw": response.text}
 
-def sell(symbol, amount):
-    body = {
-        "market": symbol,
-        "side": "sell",
-        "orderType": "market",
-        "amount": str(amount),
-        "operatorId": ""
-    }
-    print(f"💰 طلب بيع {symbol}: {body}")
-    try:
-        order = bitvavo_request("POST", "/order", body)
-        print("📦 رد البيع:", order)
-        return order
-    except Exception as e:
-        print("❌ استثناء في البيع:", e)
-        send(f"❌ خطأ في البيع: {e}")
-        return None
-
-def trader():
-    while True:
-        if r.get(IS_RUNNING) != b"1":
-            time.sleep(5)
-            continue
-
-        if r.get(IN_TRADE) == b"1":
-            time.sleep(5)
-            continue
-
-        symbol, reason, rsi = pick_best_symbol()
-
-        if not symbol and reason:
-            r.set(STATUS_KEY, reason)
-            print("📭 لم يتم اختيار عملة. السبب:", reason)
-
-        elif symbol:
-            print(f"🚀 تم اختيار {symbol}")
-            r.set(STATUS_KEY, f"🚀 محاولة دخول على {symbol}")
-
-            order, entry_price = buy(symbol)
-            if not order:
-                r.set(STATUS_KEY, f"❌ فشل الشراء على {symbol}")
-                print(f"❌ فشل شراء {symbol}")
-                continue
-
-            print(f"✅ شراء ناجح لـ {symbol} بسعر {entry_price}")
-            r.set(STATUS_KEY, f"✅ شراء ناجح على {symbol}")
-            r.set(IN_TRADE, "1")
-            r.set(LAST_TRADE, f"{symbol}:{entry_price}")
-            send(f"✅ شراء {symbol} 🤖")
-
-            time.sleep(90)
-
-            amount = order.get("filledAmount", "0")
-            sell_order = sell(symbol, amount)
-            if not sell_order:
-                r.set(IN_TRADE, "0")
-                continue
-
-            exit_price = float(sell_order.get("avgExecutionPrice", entry_price))
-            percent = ((exit_price - entry_price) / entry_price) * 100
-            result = "ربح ✅" if percent >= 0 else "خسارة ❌"
-            print(f"🔁 نتيجة الصفقة: {result} بنسبة {percent:.2f}%")
-
-            save_trade(symbol, entry_price, exit_price, reason, result, percent)
-            send(f"{symbol.split('-')[0]} {percent:.2f}%")
-
-            r.set(IN_TRADE, "0")
-
-        time.sleep(15)
-
-@app.route("/webhook", methods=["POST"])
-def telegram_webhook():
-    data = request.json
-    msg = data.get("message", {}).get("text", "")
-    if not msg:
-        return "", 200
-
-    if "/play" in msg:
-        r.set(IS_RUNNING, "1")
-        send("✅ النمس بدأ التشغيل")
-
-    elif "/stop" in msg:
-        r.set(IS_RUNNING, "0")
-        send("🛑 تم إيقاف النمس")
-
-    elif "/reset" in msg:
-        r.set(IN_TRADE, "0")
-        r.delete(LAST_TRADE)
-        r.delete(STATUS_KEY)
-        r.delete("nems:freeze")  # في حال كان في عملة مجمدة مؤقتًا
-        send("🔄 تمت إعادة التهيئة بالكامل (الحالة + الصفقة + الفريز)")
-
-    elif "/شو عم تعمل" in msg or "شو عم تعمل" in msg:
-        is_running = r.get(IS_RUNNING)
-        rsi = r.get(RSI_KEY)
-        status = r.get(STATUS_KEY)
-        msg = f"🔍 التشغيل: {'✅' if is_running == b'1' else '🛑'}\n"
-        msg += f"🎯 RSI: {rsi.decode() if rsi else '؟'}\n"
-        msg += f"📡 الحالة: {status.decode() if status else '🤐 لا يوجد إشعار'}"
-        send(msg)
-
-    elif "/الملخص" in msg:
-        trades = r.lrange("nems:trades", 0, 9)
-        text = "🧾 آخر 10 صفقات:\n\n" + "\n".join([t.decode() for t in trades])
-        send(text)
-
-    return "", 200
-
-if __name__ == "__main__":
-    threading.Thread(target=trader).start()
-    app.run(host="0.0.0.0", port=8000)
+# 🧪 جرب الآن استعلام الرصيد
+result = bitvavo_request("GET", "/balance")
+print("✅ رد Bitvavo:\n", json.dumps(result, indent=2, ensure_ascii=False))
