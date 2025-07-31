@@ -1,8 +1,7 @@
-import os, time, redis, threading, requests
+import os, time, redis, threading, requests, hmac, hashlib, json
 from flask import Flask, request
 from market_scanner import pick_best_symbol
 from memory import save_trade
-from utils import bitvavo_request
 
 app = Flask(__name__)
 r = redis.from_url(os.getenv("REDIS_URL"))
@@ -33,6 +32,32 @@ def fetch_price(symbol):
         print(f"❌ فشل جلب السعر لـ {symbol}:", e)
         return None
 
+def bitvavo_request(method, path, body=None):
+    try:
+        timestamp = str(int(time.time() * 1000))
+        body_str = json.dumps(body, separators=(',', ':')) if body else ""
+        message = f"{timestamp}{method}{path}{body_str}"
+        signature = hmac.new(
+            os.getenv("BITVAVO_API_SECRET").encode(),
+            message.encode(),
+            hashlib.sha256
+        ).hexdigest()
+
+        headers = {
+            "Bitvavo-Access-Key": os.getenv("BITVAVO_API_KEY"),
+            "Bitvavo-Access-Signature": signature,
+            "Bitvavo-Access-Timestamp": timestamp,
+            "Bitvavo-Access-Window": "10000",
+            "Content-Type": "application/json"
+        }
+
+        url = f"https://api.bitvavo.com/v2{path}"
+        response = requests.request(method, url, headers=headers, data=body_str)
+        return response.json()
+    except Exception as e:
+        print("⚠️ فشل توقيع الطلب:", e)
+        return {}
+
 def buy(symbol):
     price = fetch_price(symbol)
     if not price:
@@ -44,8 +69,7 @@ def buy(symbol):
         "market": symbol,
         "side": "buy",
         "orderType": "market",
-        "amount": str(amount),
-        "operatorId": "123567"
+        "amount": str(amount)
     }
 
     print(f"🛒 طلب شراء {symbol}: {body}")
@@ -73,8 +97,7 @@ def sell(symbol, amount):
         "market": symbol,
         "side": "sell",
         "orderType": "market",
-        "amount": str(amount),
-        "operatorId": "123567"
+        "amount": str(amount)
     }
     print(f"💰 طلب بيع {symbol}: {body}")
     try:
@@ -154,9 +177,10 @@ def telegram_webhook():
         send("🛑 تم إيقاف النمس")
 
     elif "/reset" in msg:
-        r.set(IN_TRADE, "0")
-        r.delete(LAST_TRADE)
-        send("🔄 تمت إعادة التهيئة")
+        keys = [IS_RUNNING, IN_TRADE, LAST_TRADE, STATUS_KEY, RSI_KEY]
+        for key in keys:
+            r.delete(key)
+        send("🔄 تمت إعادة التهيئة بالكامل وحذف كل الحالات المعلقة")
 
     elif "/شو عم تعمل" in msg or "شو عم تعمل" in msg:
         is_running = r.get(IS_RUNNING)
