@@ -156,7 +156,9 @@ def telegram_webhook():
     elif "/reset" in msg:
         r.set(IN_TRADE, "0")
         r.delete(LAST_TRADE)
-        send("🔄 تمت إعادة التهيئة")
+        r.delete(STATUS_KEY)
+        r.delete("nems:freeze")  # في حال كان في عملة مجمدة مؤقتًا
+        send("🔄 تمت إعادة التهيئة بالكامل (الحالة + الصفقة + الفريز)")
 
     elif "/شو عم تعمل" in msg or "شو عم تعمل" in msg:
         is_running = r.get(IS_RUNNING)
