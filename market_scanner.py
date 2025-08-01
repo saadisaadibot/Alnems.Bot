@@ -1,4 +1,5 @@
 import os
+import time
 import requests
 import redis
 from utils import get_candles
@@ -7,7 +8,10 @@ r = redis.from_url(os.getenv("REDIS_URL"))
 CONFIDENCE_KEY = "nems:confidence"
 FREEZE_PREFIX = "nems:freeze:"
 
-# ✅ اختيار أفضل 40 عملة حسب الحجم في آخر 30 دقيقة
+last_fetch = 0
+cached_top = []
+
+# ✅ جلب أفضل 40 عملة حسب حجم التداول في آخر 30 دقيقة (يُحدّث كل 10 دقائق فقط)
 def get_top_markets(limit=40):
     try:
         res = requests.get("https://api.bitvavo.com/v2/markets")
@@ -21,14 +25,17 @@ def get_top_markets(limit=40):
                     continue
                 volume = sum(float(c[5]) for c in candles)
                 market_volumes.append((market, volume))
-            except:
+            except Exception as e:
+                print(f"خطأ بجمع شموع {market}: {e}")
                 continue
 
         top = sorted(market_volumes, key=lambda x: x[1], reverse=True)
         return [m[0] for m in top[:limit]]
-    except:
+    except Exception as e:
+        print(f"فشل في get_top_markets: {e}")
         return []
 
+# ✅ تحليل ذكي لاتجاه السوق للعملة
 def analyze_trend(candles):
     closes = [float(c[4]) for c in candles]
     highs = [float(c[2]) for c in candles]
@@ -54,11 +61,19 @@ def analyze_trend(candles):
         "volume_spike": volume_spike
     }
 
+# ✅ اختيار أفضل عملة للدخول بناءً على المؤشرات
 def pick_best_symbol():
-    frozen = set(k.decode().split(FREEZE_PREFIX)[-1] for k in r.scan_iter(f"{FREEZE_PREFIX}*"))
-    top = get_top_markets()
+    global last_fetch, cached_top
+    now = time.time()
 
-    for symbol in top:
+    if now - last_fetch > 600:  # تحديث القائمة كل 10 دقائق
+        print("📊 تحديث قائمة أفضل العملات...")
+        cached_top = get_top_markets()
+        last_fetch = now
+
+    frozen = set(k.decode().split(FREEZE_PREFIX)[-1] for k in r.scan_iter(f"{FREEZE_PREFIX}*"))
+
+    for symbol in cached_top:
         if symbol in frozen:
             continue
 
@@ -76,13 +91,13 @@ def pick_best_symbol():
             wave = trend["wave"]
             spike = trend["volume_spike"]
 
-            # ✅ الذكاء الكامل: قاع منخفض + ميل إيجابي + موجة + حجم مرتفع
             if pos < 20 and slope > -1 and wave > 5 and vol > 2 and spike:
                 if confidence >= 1.0:
                     reason = f"🔥 {symbol} Pos={pos}% Slope={slope}% Wave={wave}% Vol={vol}%"
                     return symbol, reason, trend
 
-        except Exception:
+        except Exception as e:
+            print(f"❌ خطأ في تحليل {symbol}: {e}")
             continue
 
     return None, None, None
