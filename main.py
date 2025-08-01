@@ -141,13 +141,20 @@ def telegram_polling():
             if offset:
                 url += f"?offset={offset}"
             res = requests.get(url).json()
-            for update in res.get("result", []):
+
+            if not isinstance(res, dict) or "result" not in res:
+                print("⚠️ Telegram response is not valid:", res)
+                time.sleep(3)
+                continue
+
+            for update in res["result"]:
                 offset = update["update_id"] + 1
                 message = update.get("message", {})
                 text = message.get("text")
                 chat_id = str(message.get("chat", {}).get("id"))
                 if chat_id == CHAT_ID and text:
                     handle_telegram_command(text)
+
         except Exception as e:
             print("Telegram polling error:", e)
         time.sleep(2)
