@@ -13,7 +13,7 @@ load_dotenv()
 r = redis.from_url(os.getenv("REDIS_URL"))
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
-CHAT_ID = os.getenv("CHAT_ID")
+CHAT_ID = str(os.getenv("CHAT_ID"))  # 👈 تأكدنا إنها string
 BUY_AMOUNT_EUR = float(os.getenv("BUY_AMOUNT_EUR", 10))
 
 IS_TRADING_KEY = "nems:is_in_trade"
@@ -57,7 +57,7 @@ def buy(symbol):
     else:
         reason = res.get("error", res)
         send_message(f"❌ فشل شراء {symbol}: {reason}")
-        r.set(f"nems:freeze:{symbol}", "1", ex=300)  # تجميد 5 دقائق
+        r.set(f"nems:freeze:{symbol}", "1", ex=300)
         return None, None
 
 def sell(symbol, amount, entry):
@@ -85,7 +85,6 @@ def sell(symbol, amount, entry):
 def monitor_trade():
     if not r.get(IS_TRADING_KEY):
         return
-
     try:
         trade = json.loads(r.get(LAST_TRADE_KEY))
         symbol = trade["symbol"]
@@ -96,7 +95,6 @@ def monitor_trade():
         price = float(ticker.get("price", 0))
 
         change = (price - entry) / entry * 100
-
         if change >= 2 or change <= -2:
             sell(symbol, amount, entry)
 
@@ -114,10 +112,10 @@ def trader_loop():
                 print("🔍 لا فرص حالياً...")
         else:
             monitor_trade()
-
         time.sleep(60)
 
 def handle_telegram_command(text):
+    print("📩 أمر تلقاه:", text)
     text = text.strip().lower()
     if "رصيد" in text:
         msg = get_balance()
@@ -145,8 +143,11 @@ def telegram_polling():
             res = requests.get(url).json()
             for update in res.get("result", []):
                 offset = update["update_id"] + 1
-                if "message" in update and str(update["message"]["chat"]["id"]) == CHAT_ID:
-                    handle_telegram_command(update["message"]["text"])
+                message = update.get("message", {})
+                text = message.get("text")
+                chat_id = str(message.get("chat", {}).get("id"))
+                if chat_id == CHAT_ID and text:
+                    handle_telegram_command(text)
         except Exception as e:
             print("Telegram polling error:", e)
         time.sleep(2)
