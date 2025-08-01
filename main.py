@@ -31,29 +31,29 @@ def send_message(text):
 
 def get_balance():
     balances = bitvavo_request("GET", "/balance")
-
-    # ✅ نطبع الرد كامل لنفهم شو فيه
-    print("📦 الرد الكامل من /balance:")
-    print(balances)
-
-    total_eur = 0.0
-    lines = []
+    total_value = 0.0
+    summary = []
 
     for b in balances:
         try:
+            symbol = b.get("symbol")
             available = float(b.get("available", 0))
-            if available > 0.01:
-                symbol = b.get("symbol")
-                lines.append(f"{symbol}: {available:.2f}")
-                if symbol == "EUR":
-                    total_eur += available
+            if available < 0.01:
+                continue
+            if symbol == "EUR":
+                total_value += available
+                summary.append(f"EUR: {available:.2f}€")
+            else:
+                ticker = bitvavo_request("GET", f"/ticker/price?market={symbol}-EUR")
+                price = float(ticker.get("price", 0))
+                value = price * available
+                total_value += value
+                summary.append(f"{symbol}: {available:.2f} ≈ {value:.2f}€")
         except:
             continue
 
-    if total_eur:
-        lines.append(f"\n📊 الإجمالي: {total_eur:.2f}€")
-
-    return "\n".join(lines) if lines else "لا يوجد رصيد كافٍ."
+    summary.append(f"\n📊 المجموع: {total_value:.2f}€")
+    return "\n".join(summary) if summary else "لا يوجد رصيد كافٍ."
 
 def buy(symbol):
     path = "/order"
@@ -111,7 +111,6 @@ def monitor_trade():
         symbol = trade["symbol"]
         entry = trade["entry"]
         amount = trade["amount"]
-
         ticker = bitvavo_request("GET", f"/ticker/price?market={symbol}")
         price = float(ticker.get("price", 0))
         change = (price - entry) / entry * 100
@@ -139,8 +138,8 @@ def handle_telegram_command(text):
     print("📩 أمر تلقاه:", text)
     text = text.strip().lower()
     if "رصيد" in text:
-         msg = get_balance()
-         send_message(f"💰 الرصيد:\n{msg}")
+        msg = get_balance()
+        send_message(f"💰 الرصيد:\n{msg}")
     elif text == "reset":
         r.delete(IS_TRADING_KEY)
         r.delete(LAST_TRADE_KEY)
@@ -192,6 +191,6 @@ def telegram_polling():
         time.sleep(2)
 
 if __name__ == "__main__":
-    send_message("✅ تم تشغيل البوت وهو يعمل الآن...")
+    send_message("🚀 النمس الذكي يعمل الآن! جاهز لاكتشاف الفرص.")
     threading.Thread(target=trader_loop).start()
     telegram_polling()
