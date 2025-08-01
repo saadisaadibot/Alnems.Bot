@@ -15,7 +15,7 @@ r = redis.from_url(os.getenv("REDIS_URL"))
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 CHAT_ID = str(os.getenv("CHAT_ID"))
-BUY_AMOUNT_EUR = float(os.getenv("BUY_AMOUNT_EUR", 10))
+BUY_AMOUNT_EUR = float(os.getenv("BUY_AMOUNT_EUR", 20))
 
 ACTIVE_TRADES_KEY = "nems:active_trades"
 TRADE_KEY = "nems:trades"
