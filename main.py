@@ -31,32 +31,28 @@ def send_message(text):
 
 def get_balance():
     balances = bitvavo_request("GET", "/balance")
+
+    # ✅ نطبع الرد كامل لنفهم شو فيه
+    print("📦 الرد الكامل من /balance:")
+    print(balances)
+
     total_eur = 0.0
     lines = []
 
     for b in balances:
         try:
-            symbol = b.get("symbol", "")
             available = float(b.get("available", 0))
-            if available < 0.01:
-                continue
-
-            # إذا كانت العملة EUR، احفظها كمبلغ إجمالي
-            if symbol == "EUR":
-                total_eur += available
-                lines.append(f"💶 EUR: {available:.2f}€")
-            else:
-                # نحسب قيمة العملة باليورو حسب السعر الحالي
-                price_data = bitvavo_request("GET", f"/ticker/price?market={symbol}-EUR")
-                price = float(price_data.get("price", 0))
-                eur_value = available * price
-                total_eur += eur_value
-                lines.append(f"{symbol}: {available:.4f} ≈ {eur_value:.2f}€")
-
-        except Exception as e:
+            if available > 0.01:
+                symbol = b.get("symbol")
+                lines.append(f"{symbol}: {available:.2f}")
+                if symbol == "EUR":
+                    total_eur += available
+        except:
             continue
 
-    lines.append(f"\n📊 الإجمالي: {total_eur:.2f}€")
+    if total_eur:
+        lines.append(f"\n📊 الإجمالي: {total_eur:.2f}€")
+
     return "\n".join(lines) if lines else "لا يوجد رصيد كافٍ."
 
 def buy(symbol):
