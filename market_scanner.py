@@ -29,10 +29,10 @@ def load_params():
 # 📊 تحديث توب 40 بناءً على حجم التداول آخر 30 دقيقة
 def get_top_markets(limit=40):
     print("🚀 دخل فعليًا إلى get_top_markets()")
-    try:
+        try:
         res = requests.get("https://api.bitvavo.com/v2/markets")
-        print("📥 رد Bitvavo:", res.status_code, res.text[:300])
-        all_markets = [m["market"] for m in res.json() if m["market"].endswith("-EUR")]
+        print("📩 رد Bitvavo:", res.status_code)
+        all_markets = [m["market"] for m in res.json()]
         volumes = []
 
         for m in all_markets:
@@ -42,13 +42,17 @@ def get_top_markets(limit=40):
                     continue
                 volume = sum(float(c[5]) for c in candles)
                 volumes.append((m, volume))
-        except Exception as e:
-        print("❌ خطأ أثناء جلب الأسواق:", str(e))
-        return []
+            except Exception as e:
+                print("❌ خطأ أثناء جلب الشموع:", str(e))
+                continue
 
         sorted_markets = sorted(volumes, key=lambda x: x[1], reverse=True)
-        print("📊 Top 40 by volume:", [f"{m[0]}: {round(m[1], 2)}" for m in sorted_markets[:40]])
+        print("📊 Top 40 by volume:", [f"{m[0]}: {m[1]:.0f}" for m in sorted_markets[:limit]])
         return [m[0] for m in sorted_markets[:limit]]
+
+    except Exception as e:
+        print("❌ خطأ أثناء جلب الأسواق:", str(e))
+        return []
 
 # 🧠 تحليل المؤشرات للشموع
 def analyze_trend(candles):
