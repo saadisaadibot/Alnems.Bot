@@ -61,7 +61,8 @@ def buy(symbol):
         "market": symbol,
         "side": "buy",
         "orderType": "market",
-        "amountQuote": f"{BUY_AMOUNT_EUR:.2f}"
+        "amountQuote": f"{BUY_AMOUNT_EUR:.2f}",
+        "operatorId": ""  # ← لحل مشكلة parameter is required
     }
     res = bitvavo_request("POST", path, body)
     if isinstance(res, dict) and "id" in res:
@@ -81,13 +82,15 @@ def buy(symbol):
         r.set(f"nems:freeze:{symbol}", "1", ex=300)
     return None, None
 
+
 def sell(symbol, amount, entry):
     path = "/order"
     body = {
         "market": symbol,
         "side": "sell",
         "orderType": "market",
-        "amount": str(amount)
+        "amount": str(amount),
+        "operatorId": ""  # ← لحل نفس المشكلة بالبيع
     }
     res = bitvavo_request("POST", path, body)
     if isinstance(res, dict) and "id" in res:
