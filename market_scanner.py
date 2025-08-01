@@ -44,6 +44,7 @@ def get_top_markets(limit=40):
                 continue
 
         sorted_markets = sorted(volumes, key=lambda x: x[1], reverse=True)
+        print("📊 Top 40 by volume:", [m[0] for m in sorted_markets[:40]])
         return [m[0] for m in sorted_markets[:limit]]
     except:
         return []
@@ -195,5 +196,4 @@ def get_top_candidates(limit=5):
             continue
 
     sorted_results = sorted(results, key=lambda x: x[1], reverse=True)
-    print("📊 Top 40 by volume:", [m[0] for m in sorted_markets[:40]])
     return sorted_results[:limit]
