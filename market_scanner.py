@@ -42,8 +42,9 @@ def get_top_markets(limit=40):
                     continue
                 volume = sum(float(c[5]) for c in candles)
                 volumes.append((m, volume))
-            except:
-                continue
+        except Exception as e:
+        print("❌ خطأ أثناء جلب الأسواق:", str(e))
+        return []
 
         sorted_markets = sorted(volumes, key=lambda x: x[1], reverse=True)
         print("📊 Top 40 by volume:", [f"{m[0]}: {round(m[1], 2)}" for m in sorted_markets[:40]])
