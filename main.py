@@ -13,7 +13,7 @@ load_dotenv()
 r = redis.from_url(os.getenv("REDIS_URL"))
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
-CHAT_ID = str(os.getenv("CHAT_ID"))  # نضمن تطابق النوع
+CHAT_ID = str(os.getenv("CHAT_ID"))
 BUY_AMOUNT_EUR = float(os.getenv("BUY_AMOUNT_EUR", 10))
 
 IS_TRADING_KEY = "nems:is_in_trade"
@@ -31,14 +31,33 @@ def send_message(text):
 
 def get_balance():
     balances = bitvavo_request("GET", "/balance")
+    prices = {}
+    try:
+        tickers = bitvavo_request("GET", "/ticker/price")
+        prices = {t["market"].replace("-EUR", ""): float(t["price"]) for t in tickers if t["market"].endswith("EUR")}
+    except:
+        pass
+
+    total_eur = 0
     output = []
     for b in balances:
         try:
+            sym = b["symbol"]
             available = float(b.get("available", 0))
             if available > 0.01:
-                output.append(f"{b['symbol']}: {available:.2f}")
+                if sym == "EUR":
+                    total_eur += available
+                    output.append(f"EUR: {available:.2f}")
+                elif sym in prices:
+                    eur_value = available * prices[sym]
+                    total_eur += eur_value
+                    output.append(f"{sym}: {available:.2f} ≈ €{eur_value:.2f}")
+                else:
+                    output.append(f"{sym}: {available:.2f}")
         except:
             continue
+
+    output.append(f"📊 الإجمالي: €{total_eur:.2f}")
     return "\n".join(output) if output else "لا يوجد رصيد كافٍ."
 
 def buy(symbol):
@@ -47,7 +66,7 @@ def buy(symbol):
         "market": symbol,
         "side": "buy",
         "orderType": "market",
-        "amountQuote": f"{BUY_AMOUNT_EUR:.2f}"  # تأكيد أنها string بفاصلة عشرية
+        "amountQuote": f"{BUY_AMOUNT_EUR:.2f}"
     }
     res = bitvavo_request("POST", path, body)
     if isinstance(res, dict) and "id" in res:
@@ -149,7 +168,6 @@ def telegram_polling():
                 url += f"?offset={offset}"
 
             response = requests.get(url)
-
             try:
                 res = response.json()
             except Exception:
@@ -179,5 +197,6 @@ def telegram_polling():
         time.sleep(2)
 
 if __name__ == "__main__":
+    send_message("✅ تم تشغيل البوت وهو يعمل الآن...")
     threading.Thread(target=trader_loop).start()
     telegram_polling()
