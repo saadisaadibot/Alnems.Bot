@@ -28,6 +28,7 @@ def load_params():
 
 # 📊 تحديث توب 40 بناءً على حجم التداول آخر 30 دقيقة
 def get_top_markets(limit=40):
+    print("🚀 دخل فعليًا إلى get_top_markets()")
     try:
         res = requests.get("https://api.bitvavo.com/v2/markets")
         all_markets = [m["market"] for m in res.json() if m["market"].endswith("-EUR")]
