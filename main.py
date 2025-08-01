@@ -2,6 +2,7 @@ import os
 import time
 import redis
 import json
+from uuid import uuid4
 import threading
 import requests
 from utils import bitvavo_request
@@ -76,7 +77,8 @@ def buy(symbol):
                 "entry": price,
                 "amount": amount,
                 "trail": price,
-                "trail_percent": 1.5
+                "trail_percent": 0.5,
+                "max_profit": 0  # ⬅️ تم إضافتها هنا
             }))
             send_message(f"✅ شراء {symbol} بسعر {price:.4f}")
             return price, amount
@@ -124,20 +126,22 @@ def monitor_trades():
             symbol = trade["symbol"]
             entry = trade["entry"]
             amount = trade["amount"]
-            trail_price = trade.get("trail", entry)
-            trail_percent = trade.get("trail_percent", 1.5)
+            trail_percent = trade.get("trail_percent", 0.5)
+            max_profit = trade.get("max_profit", 0)
 
+            # السعر الحالي
             ticker = bitvavo_request("GET", f"/ticker/price?market={symbol}")
             price = float(ticker.get("price", 0))
-            change = (price - entry) / entry * 100
+            profit = (price - entry) / entry * 100
 
-            # تحديث التريلينغ ستوب
-            new_high = max(trail_price, price)
-            r.hset(ACTIVE_TRADES_KEY, symbol, json.dumps({
-                **trade, "trail": new_high
-            }))
+            # تحديث أعلى ربح تحقق
+            if profit > max_profit:
+                trade["max_profit"] = round(profit, 4)
+                r.hset(ACTIVE_TRADES_KEY, symbol, json.dumps(trade))
+                continue  # لا تبيع الآن، لأن السعر في ذروة جديدة
 
-            if price <= new_high * (1 - trail_percent / 100):
+            # تحقق إذا هبط من الذروة بأكثر من trail_percent
+            if max_profit > 0 and profit <= max_profit - trail_percent:
                 sell(symbol, amount, entry)
 
         except Exception as e:
