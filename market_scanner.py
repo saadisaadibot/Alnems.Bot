@@ -7,11 +7,25 @@ r = redis.from_url(os.getenv("REDIS_URL"))
 CONFIDENCE_KEY = "nems:confidence"
 FREEZE_PREFIX = "nems:freeze:"
 
-def get_top_markets(limit=50):
+# ✅ اختيار أفضل 40 عملة حسب الحجم في آخر 30 دقيقة
+def get_top_markets(limit=40):
     try:
         res = requests.get("https://api.bitvavo.com/v2/markets")
-        markets = res.json()
-        return [m["market"] for m in markets if m["market"].endswith("-EUR")][:limit]
+        all_markets = [m["market"] for m in res.json() if m["market"].endswith("-EUR")]
+        market_volumes = []
+
+        for market in all_markets:
+            try:
+                candles = get_candles(market, interval="1m", limit=30)
+                if len(candles) < 10:
+                    continue
+                volume = sum(float(c[5]) for c in candles)
+                market_volumes.append((market, volume))
+            except:
+                continue
+
+        top = sorted(market_volumes, key=lambda x: x[1], reverse=True)
+        return [m[0] for m in top[:limit]]
     except:
         return []
 
@@ -25,11 +39,11 @@ def analyze_trend(candles):
     low = min(lows)
     last = closes[-1]
 
-    position = (last - low) / (high - low) * 100  # نسبة بين القاع والقمة
+    position = (last - low) / (high - low) * 100
     slope = (closes[-1] - closes[0]) / closes[0] * 100
     volatility = (high - low) / low * 100
     wave = (max(closes) - min(closes)) / low * 100
-    volume_spike = volumes[-1] > (sum(volumes[:-5]) / len(volumes[:-5])) * 2  # ارتفاع بالحجم
+    volume_spike = volumes[-1] > (sum(volumes[:-5]) / len(volumes[:-5])) * 2
 
     return {
         "position": round(position, 1),
@@ -62,17 +76,13 @@ def pick_best_symbol():
             wave = trend["wave"]
             spike = trend["volume_spike"]
 
-            # الذكاء هنا: اختيار قاع منخفض + ميل إيجابي + حركة عنيفة + حجم مرتفع
+            # ✅ الذكاء الكامل: قاع منخفض + ميل إيجابي + موجة + حجم مرتفع
             if pos < 20 and slope > -1 and wave > 5 and vol > 2 and spike:
                 if confidence >= 1.0:
                     reason = f"🔥 {symbol} Pos={pos}% Slope={slope}% Wave={wave}% Vol={vol}%"
                     return symbol, reason, trend
 
-            # شرط راقب فقط: قاع متوسط وثقة مرتفعة
-            elif pos < 30 and confidence >= 1.7:
-                continue
-
-        except Exception as e:
+        except Exception:
             continue
 
     return None, None, None
