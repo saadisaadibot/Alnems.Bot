@@ -96,18 +96,25 @@ def sell(symbol, amount, entry):
         "side": "sell",
         "orderType": "market",
         "amount": str(amount),
-        "operatorId": ""  # ← لحل نفس المشكلة بالبيع
+        "operatorId": ""  # ← مبدئياً فارغ لتفادي الخطأ الإجباري
     }
     res = bitvavo_request("POST", path, body)
-    if isinstance(res, dict) and "id" in res:
-        price = float(res["fills"][0]["price"])
-        profit = (price - entry) / entry * 100
-        result = "win" if profit >= 0 else "loss"
-        save_trade(symbol, entry, price, "auto-sell", result, profit)
-        send_message(f"💰 بيع {symbol} بسعر {price:.4f} | الربح: {profit:.2f}%")
-        r.delete(IS_TRADING_KEY)
-        r.delete(LAST_TRADE_KEY)
-        return True
+
+    # ✅ تحقق من نجاح الصفقة بناءً على status
+    if isinstance(res, dict) and res.get("status") == "filled":
+        try:
+            fills = res.get("fills", [])
+            price = float(fills[0]["price"]) if fills else float(entry)
+            profit = (price - entry) / entry * 100
+            result = "win" if profit >= 0 else "loss"
+            save_trade(symbol, entry, price, "auto-sell", result, profit)
+            send_message(f"💰 بيع {symbol} بسعر {price:.4f} | الربح: {profit:.2f}%")
+            r.delete(IS_TRADING_KEY)
+            r.delete(LAST_TRADE_KEY)
+            return True
+        except Exception as e:
+            send_message(f"⚠️ البيع تم لكن فشل تحليل البيانات: {e}")
+            return True
     else:
         send_message(f"❌ فشل بيع {symbol}: {res}")
         return False
