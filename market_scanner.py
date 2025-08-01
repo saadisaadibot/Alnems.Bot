@@ -44,7 +44,7 @@ def get_top_markets(limit=40):
                 continue
 
         sorted_markets = sorted(volumes, key=lambda x: x[1], reverse=True)
-        print("📊 Top 40 by volume:", [m[0] for m in sorted_markets[:40]])
+        print("📊 Top 40 by volume:", [f"{m[0]}: {round(m[1], 2)}" for m in sorted_markets[:40]])
         return [m[0] for m in sorted_markets[:limit]]
     except:
         return []
