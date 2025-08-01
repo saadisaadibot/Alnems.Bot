@@ -178,14 +178,36 @@ def get_summary():
     top_coins = get_top_confident()
     top_str = "\n".join([f"{s[0]}: {s[1]}" for s in top_coins])
 
+    # 🔁 تحليل تغييرات الاستراتيجية
+    adjustments = []
+    if r.exists("nems:strategy:position"):
+        pos = float(r.get("nems:strategy:position"))
+        adjustments.append(f"📉 تم تخفيض شرط Position إلى {pos:.1f}% بعد تجارب ناجحة.")
+    if r.exists("nems:strategy:slope"):
+        slope = float(r.get("nems:strategy:slope"))
+        adjustments.append(f"📈 تم رفع شرط Slope إلى {slope:.2f}% لتقليل الصفقات الخاسرة.")
+    if r.exists("nems:strategy:wave"):
+        wave = float(r.get("nems:strategy:wave"))
+        adjustments.append(f"🌊 تم تعديل شرط Wave إلى {wave:.1f}% بناءً على الأداء.")
+
+    strategy_notes = "\n".join(adjustments) or "⚙️ لا توجد تعديلات استراتيجية حالياً."
+
+    # 🤖 تقييم الذكاء (بناءً على نسبة الفوز)
+    intelligence = (wins / total) * 100 if total else 0
+    ai_rating = "🔵 متوسط" if intelligence < 60 else "🟢 ذكي" if intelligence < 80 else "🟣 خارق"
+
     return f"""📈 ملخص التداول:
 عدد الصفقات: {total}
 ✅ رابحة: {wins} | ❌ خاسرة: {losses}
 💹 الربح التراكمي: {profit:.2f}%
 📊 متوسط الصفقة: {avg:.2f}%
+🤖 نسبة الذكاء: {intelligence:.1f}% ({ai_rating})
 
 🏅 العملات الأعلى ثقة:
 {top_str}
+
+🛠️ تحديثات الاستراتيجية:
+{strategy_notes}
 
 🕵️ آخر 3 صفقات:
 {last_trades}
