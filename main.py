@@ -66,39 +66,43 @@ def buy(symbol):
         "clientOrderId": str(uuid4()),
         "operatorId": ""
     }
+
     res = bitvavo_request("POST", "/order", body)
 
     if isinstance(res, dict) and res.get("status") == "filled":
         try:
             fills = res.get("fills", [])
-if not fills or "price" not in fills[0]:
-    send_message(f"❌ فشل الحصول على السعر بعد الشراء: {symbol}")
-    return
+            if not fills or "price" not in fills[0]:
+                send_message(f"❌ فشل الحصول على السعر بعد الشراء: {symbol}")
+                return None, None
 
-price = float(fills[0]["price"])
-amount = float(fills[0]["amount"])
+            price = float(fills[0]["price"])
+            amount = float(fills[0]["amount"])
 
-if price == 0:
-    send_message(f"❌ السعر يساوي صفر بعد الشراء: {symbol}")
-    return
+            if price == 0:
+                send_message(f"❌ السعر يساوي صفر بعد الشراء: {symbol}")
+                return None, None
+
             r.hset(ACTIVE_TRADES_KEY, symbol, json.dumps({
                 "symbol": symbol,
                 "entry": price,
                 "amount": amount,
                 "trail": price,
                 "trail_percent": 0.5,
-                "max_profit": 0  # ⬅️ تم إضافتها هنا
+                "max_profit": 0
             }))
             send_message(f"✅ شراء {symbol} بسعر {price:.4f}")
             return price, amount
+
         except Exception as e:
             send_message(f"⚠️ تم الشراء لكن فشل تحليل الرد: {e}")
+            return None, None
+
     else:
         reason = res.get("error") or json.dumps(res, ensure_ascii=False)
         send_message(f"❌ فشل شراء {symbol}: {reason}")
         r.set(f"nems:freeze:{symbol}", "1", ex=300)
-
-    return None, None
+        return None, None
 
 def sell(symbol, amount, entry):
     body = {
