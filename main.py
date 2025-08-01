@@ -62,24 +62,30 @@ def buy(symbol):
         "side": "buy",
         "orderType": "market",
         "amountQuote": f"{BUY_AMOUNT_EUR:.2f}",
-        "operatorId": ""  # ← لحل مشكلة parameter is required
+        "operatorId": ""  # ← حل مشكلة parameter is required
     }
     res = bitvavo_request("POST", path, body)
-    if isinstance(res, dict) and "id" in res:
+
+    if isinstance(res, dict) and res.get("status") == "filled":
         try:
             fills = res.get("fills", [])
             price = float(fills[0]["price"])
             amount = float(fills[0]["amount"])
             r.set(IS_TRADING_KEY, "1")
-            r.set(LAST_TRADE_KEY, json.dumps({"symbol": symbol, "entry": price, "amount": amount}))
+            r.set(LAST_TRADE_KEY, json.dumps({
+                "symbol": symbol,
+                "entry": price,
+                "amount": amount
+            }))
             send_message(f"✅ شراء {symbol} تم بنجاح بسعر {price:.4f}")
             return price, amount
         except Exception as e:
             send_message(f"⚠️ تم الشراء لكن تحليل الرد فشل: {e}")
     else:
-        reason = res.get("error", res)
+        reason = res.get("error") or json.dumps(res, ensure_ascii=False)
         send_message(f"❌ فشل شراء {symbol}: {reason}")
         r.set(f"nems:freeze:{symbol}", "1", ex=300)
+
     return None, None
 
 
