@@ -71,8 +71,16 @@ def buy(symbol):
     if isinstance(res, dict) and res.get("status") == "filled":
         try:
             fills = res.get("fills", [])
-            price = float(fills[0]["price"])
-            amount = float(fills[0]["amount"])
+if not fills or "price" not in fills[0]:
+    send_message(f"❌ فشل الحصول على السعر بعد الشراء: {symbol}")
+    return
+
+price = float(fills[0]["price"])
+amount = float(fills[0]["amount"])
+
+if price == 0:
+    send_message(f"❌ السعر يساوي صفر بعد الشراء: {symbol}")
+    return
             r.hset(ACTIVE_TRADES_KEY, symbol, json.dumps({
                 "symbol": symbol,
                 "entry": price,
