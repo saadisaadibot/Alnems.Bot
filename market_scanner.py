@@ -31,6 +31,7 @@ def get_top_markets(limit=40):
     print("🚀 دخل فعليًا إلى get_top_markets()")
     try:
         res = requests.get("https://api.bitvavo.com/v2/markets")
+        print("📥 رد Bitvavo:", res.status_code, res.text[:300])
         all_markets = [m["market"] for m in res.json() if m["market"].endswith("-EUR")]
         volumes = []
 
