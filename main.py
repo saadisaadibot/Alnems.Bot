@@ -233,7 +233,13 @@ def handle_telegram_command(text):
                 f"{json.loads(v)['symbol']} بسعر {json.loads(v)['entry']}" for v in active.values()
             ])
             send_message(f"🔄 الصفقات النشطة:\n{status}")
-
+    elif "شو شايف" in text or "أقوى عملات" in text:
+        from market_scanner import get_top_candidates
+        top = get_top_candidates()
+        msg = "👁️ العملات الأقوى حاليًا:\n"
+        for i, (symbol, score, debug) in enumerate(top, 1):
+            msg += f"{i}. {symbol} | نقاط={score} | {' | '.join(debug)}\n"
+        send_message(msg.strip() or "❌ لا يوجد بيانات حالياً.")
 def telegram_polling():
     offset = None
     while True:
