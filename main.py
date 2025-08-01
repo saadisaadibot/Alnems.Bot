@@ -142,8 +142,16 @@ def telegram_polling():
                 url += f"?offset={offset}"
 
             response = requests.get(url)
-            res = response.json()
 
+            # ✅ تأكد أن الرد بصيغة JSON وليس نص
+            try:
+                res = response.json()
+            except Exception as e:
+                print("⚠️ رد Telegram ليس JSON:", response.text)
+                time.sleep(3)
+                continue
+
+            # ✅ تأكد أن الرد فيه result
             if not isinstance(res, dict) or "result" not in res:
                 print("⚠️ Telegram response is not valid:", res)
                 time.sleep(3)
