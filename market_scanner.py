@@ -195,5 +195,5 @@ def get_top_candidates(limit=5):
             continue
 
     sorted_results = sorted(results, key=lambda x: x[1], reverse=True)
-    print("✅ Candidates found:", sorted_results[:limit])
+    print("📊 Top 40 by volume:", [m[0] for m in sorted_markets[:40]])
     return sorted_results[:limit]
