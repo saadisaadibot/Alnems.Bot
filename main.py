@@ -13,7 +13,7 @@ load_dotenv()
 r = redis.from_url(os.getenv("REDIS_URL"))
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
-CHAT_ID = str(os.getenv("CHAT_ID"))  # 👈 تأكدنا إنها string
+CHAT_ID = str(os.getenv("CHAT_ID"))  # نضمن تطابق النوع
 BUY_AMOUNT_EUR = float(os.getenv("BUY_AMOUNT_EUR", 10))
 
 IS_TRADING_KEY = "nems:is_in_trade"
@@ -33,9 +33,12 @@ def get_balance():
     balances = bitvavo_request("GET", "/balance")
     output = []
     for b in balances:
-        available = float(b.get("available", 0))
-        if available > 0.01:
-            output.append(f"{b['symbol']}: {available:.2f}")
+        try:
+            available = float(b.get("available", 0))
+            if available > 0.01:
+                output.append(f"{b['symbol']}: {available:.2f}")
+        except:
+            continue
     return "\n".join(output) if output else "لا يوجد رصيد كافٍ."
 
 def buy(symbol):
@@ -44,21 +47,25 @@ def buy(symbol):
         "market": symbol,
         "side": "buy",
         "orderType": "market",
-        "amountQuote": str(BUY_AMOUNT_EUR)
+        "amountQuote": f"{BUY_AMOUNT_EUR:.2f}"  # تأكيد أنها string بفاصلة عشرية
     }
     res = bitvavo_request("POST", path, body)
-    if "id" in res:
-        price = float(res["fills"][0]["price"])
-        amount = float(res["fills"][0]["amount"])
-        r.set(IS_TRADING_KEY, "1")
-        r.set(LAST_TRADE_KEY, json.dumps({"symbol": symbol, "entry": price, "amount": amount}))
-        send_message(f"✅ شراء {symbol} تم بنجاح بسعر {price:.4f}")
-        return price, amount
+    if isinstance(res, dict) and "id" in res:
+        try:
+            fills = res.get("fills", [])
+            price = float(fills[0]["price"])
+            amount = float(fills[0]["amount"])
+            r.set(IS_TRADING_KEY, "1")
+            r.set(LAST_TRADE_KEY, json.dumps({"symbol": symbol, "entry": price, "amount": amount}))
+            send_message(f"✅ شراء {symbol} تم بنجاح بسعر {price:.4f}")
+            return price, amount
+        except Exception as e:
+            send_message(f"⚠️ تم الشراء لكن تحليل الرد فشل: {e}")
     else:
         reason = res.get("error", res)
         send_message(f"❌ فشل شراء {symbol}: {reason}")
         r.set(f"nems:freeze:{symbol}", "1", ex=300)
-        return None, None
+    return None, None
 
 def sell(symbol, amount, entry):
     path = "/order"
@@ -69,7 +76,7 @@ def sell(symbol, amount, entry):
         "amount": str(amount)
     }
     res = bitvavo_request("POST", path, body)
-    if "id" in res:
+    if isinstance(res, dict) and "id" in res:
         price = float(res["fills"][0]["price"])
         profit = (price - entry) / entry * 100
         result = "win" if profit >= 0 else "loss"
@@ -93,8 +100,8 @@ def monitor_trade():
 
         ticker = bitvavo_request("GET", f"/ticker/price?market={symbol}")
         price = float(ticker.get("price", 0))
-
         change = (price - entry) / entry * 100
+
         if change >= 2 or change <= -2:
             sell(symbol, amount, entry)
 
@@ -143,17 +150,15 @@ def telegram_polling():
 
             response = requests.get(url)
 
-            # ✅ تأكد أن الرد بصيغة JSON وليس نص
             try:
                 res = response.json()
-            except Exception as e:
-                print("⚠️ رد Telegram ليس JSON:", response.text)
+            except Exception:
+                print("⚠️ رد Telegram غير صالح:", response.text)
                 time.sleep(3)
                 continue
 
-            # ✅ تأكد أن الرد فيه result
             if not isinstance(res, dict) or "result" not in res:
-                print("⚠️ Telegram response is not valid:", res)
+                print("⚠️ رد Telegram غير متوقع:", res)
                 time.sleep(3)
                 continue
 
