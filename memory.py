@@ -5,7 +5,6 @@ import json
 r = redis.from_url(os.getenv("REDIS_URL"))
 
 TRADE_KEY = "nems:trades"
-STATUS_KEY = "nems:is_in_trade"
 CONFIDENCE_KEY = "nems:confidence"
 
 # 🧠 تخزين الصفقة في الذاكرة
@@ -19,13 +18,13 @@ def save_trade(symbol, entry_price, exit_price, reason, result, percent):
         "reason": reason
     }
     r.lpush(TRADE_KEY, json.dumps(trade))
-    r.ltrim(TRADE_KEY, 0, 49)  # نحفظ آخر 50 صفقة فقط
+    r.ltrim(TRADE_KEY, 0, 49)  # نحفظ فقط آخر 50 صفقة
 
-    # نعلم حسب نتيجة الصفقة
+    # تعديل الثقة حسب النتيجة
     success = percent >= 0
     update_confidence(symbol, success)
 
-# 🔁 تعديل ثقة العملة بناءً على نتيجة الصفقة
+# 🔁 تعديل ثقة العملة
 def update_confidence(symbol, success):
     current = float(r.hget(CONFIDENCE_KEY, symbol) or 1.0)
     if success:
@@ -34,7 +33,7 @@ def update_confidence(symbol, success):
         new = max(0.5, current - 0.3)
     r.hset(CONFIDENCE_KEY, symbol, round(new, 2))
 
-# 🔎 عرض أفضل العملات حسب الثقة
+# 🔎 أفضل العملات حسب الثقة
 def get_top_confident(limit=10):
     all_conf = r.hgetall(CONFIDENCE_KEY)
     sorted_conf = sorted(
@@ -44,7 +43,7 @@ def get_top_confident(limit=10):
     )
     return sorted_conf[:limit]
 
-# 🧹 ممكن نستخدم لاحقًا لتنظيف العملات المنسية
+# 🧹 تنظيف العملات المنسية أو الضعيفة
 def cleanup_confidence(min_threshold=0.6):
     all_conf = r.hgetall(CONFIDENCE_KEY)
     for k, v in all_conf.items():
