@@ -18,6 +18,7 @@ BUY_AMOUNT_EUR = float(os.getenv("BUY_AMOUNT_EUR", 10))
 
 ACTIVE_TRADES_KEY = "nems:active_trades"
 TRADE_KEY = "nems:trades"
+TRAIL_KEY = "nems:trailing"
 
 def send_message(text):
     print(">>", text)
@@ -61,7 +62,7 @@ def buy(symbol):
         "side": "buy",
         "orderType": "market",
         "amountQuote": f"{BUY_AMOUNT_EUR:.2f}",
-        "operatorId": ""
+        "clientOrderId": str(uuid4())
     }
     res = bitvavo_request("POST", "/order", body)
 
@@ -73,12 +74,14 @@ def buy(symbol):
             r.hset(ACTIVE_TRADES_KEY, symbol, json.dumps({
                 "symbol": symbol,
                 "entry": price,
-                "amount": amount
+                "amount": amount,
+                "trail": price,
+                "trail_percent": 1.5
             }))
-            send_message(f"✅ شراء {symbol} تم بنجاح بسعر {price:.4f}")
+            send_message(f"✅ شراء {symbol} بسعر {price:.4f}")
             return price, amount
         except Exception as e:
-            send_message(f"⚠️ تم الشراء لكن تحليل الرد فشل: {e}")
+            send_message(f"⚠️ تم الشراء لكن فشل تحليل الرد: {e}")
     else:
         reason = res.get("error") or json.dumps(res, ensure_ascii=False)
         send_message(f"❌ فشل شراء {symbol}: {reason}")
@@ -92,7 +95,7 @@ def sell(symbol, amount, entry):
         "side": "sell",
         "orderType": "market",
         "amount": str(amount),
-        "operatorId": ""
+        "clientOrderId": str(uuid4())
     }
     res = bitvavo_request("POST", "/order", body)
 
@@ -121,12 +124,20 @@ def monitor_trades():
             symbol = trade["symbol"]
             entry = trade["entry"]
             amount = trade["amount"]
+            trail_price = trade.get("trail", entry)
+            trail_percent = trade.get("trail_percent", 1.5)
 
             ticker = bitvavo_request("GET", f"/ticker/price?market={symbol}")
             price = float(ticker.get("price", 0))
             change = (price - entry) / entry * 100
 
-            if change >= 2 or change <= -2:
+            # تحديث التريلينغ ستوب
+            new_high = max(trail_price, price)
+            r.hset(ACTIVE_TRADES_KEY, symbol, json.dumps({
+                **trade, "trail": new_high
+            }))
+
+            if price <= new_high * (1 - trail_percent / 100):
                 sell(symbol, amount, entry)
 
         except Exception as e:
@@ -175,7 +186,6 @@ def get_summary():
 """
 
 def handle_telegram_command(text):
-    print("📩 أمر تلقاه:", text)
     text = text.strip().lower()
     if "رصيد" in text:
         send_message(f"💰 الرصيد:\n{get_balance()}")
@@ -222,6 +232,6 @@ def telegram_polling():
         time.sleep(2)
 
 if __name__ == "__main__":
-    send_message("🚀 النمس الذكي يعمل الآن! يدير صفقتين في نفس الوقت.")
+    send_message("🚀 النمس الذكي بدأ العمل - يدير صفقتين ويستخدم Trailing Stop.")
     threading.Thread(target=trader_loop).start()
     telegram_polling()
