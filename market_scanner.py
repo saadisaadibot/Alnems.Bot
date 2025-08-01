@@ -74,7 +74,7 @@ def pick_best_symbol():
     now = time.time()
 
     # كل 10 دقائق يحدث قائمة العملات النشطة
-    if now - last_fetch > 600:
+    if now - last_fetch > 10:
         print("📊 تحديث قائمة العملات...")
         cached_top = get_top_markets()
         last_fetch = now
