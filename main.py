@@ -63,7 +63,7 @@ def buy(symbol):
         "side": "buy",
         "orderType": "market",
         "amountQuote": f"{BUY_AMOUNT_EUR:.2f}",
-        "clientOrderId": str(uuid4())
+        "clientOrderId": str(uuid4()),
         "operatorId": ""
     }
     res = bitvavo_request("POST", "/order", body)
@@ -98,7 +98,7 @@ def sell(symbol, amount, entry):
         "side": "sell",
         "orderType": "market",
         "amount": str(amount),
-        "clientOrderId": str(uuid4())
+        "clientOrderId": str(uuid4()),
         "operatorId": ""
     }
     res = bitvavo_request("POST", "/order", body)
