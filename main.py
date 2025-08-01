@@ -148,7 +148,7 @@ def trader_loop():
                 print("🔍 لا فرص حالياً...")
         else:
             monitor_trade()
-        time.sleep(60)
+        time.sleep(2)
 
 def handle_telegram_command(text):
     print("📩 أمر تلقاه:", text)
