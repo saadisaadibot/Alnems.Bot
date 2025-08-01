@@ -135,3 +135,64 @@ def pick_best_symbol():
             continue
 
     return None, None, None
+# 📋 عرض أقوى العملات حتى لو لم تصل للحد الأدنى للنقاط
+def get_top_candidates(limit=5):
+    global last_fetch, cached_top
+    now = time.time()
+
+    if now - last_fetch > 600:
+        cached_top = get_top_markets()
+        last_fetch = now
+
+    frozen = set(k.decode().split(FREEZE_PREFIX)[-1] for k in r.scan_iter(f"{FREEZE_PREFIX}*"))
+    params = load_params()
+    results = []
+
+    for symbol in cached_top:
+        if symbol in frozen:
+            continue
+        try:
+            candles = get_candles(symbol, interval="1m", limit=60)
+            if len(candles) < 30:
+                continue
+
+            trend = analyze_trend(candles)
+            score = 0
+            debug = []
+
+            if trend["position"] < params["pos_max"]:
+                score += 1
+                debug.append(f"✅ Pos")
+            else:
+                debug.append(f"❌ Pos")
+
+            if trend["slope"] > params["slope_min"]:
+                score += 1
+                debug.append(f"✅ Slope")
+            else:
+                debug.append(f"❌ Slope")
+
+            if trend["wave"] > params["wave_min"]:
+                score += 1
+                debug.append(f"✅ Wave")
+            else:
+                debug.append(f"❌ Wave")
+
+            if trend["volatility"] > params["vol_min"]:
+                score += 1
+                debug.append(f"✅ Vol")
+            else:
+                debug.append(f"❌ Vol")
+
+            if trend["volume_spike"]:
+                score += 1
+                debug.append(f"✅ Spike")
+            else:
+                debug.append(f"❌ Spike")
+
+            results.append((symbol, score, debug))
+        except:
+            continue
+
+    sorted_results = sorted(results, key=lambda x: x[1], reverse=True)
+    return sorted_results[:limit]
