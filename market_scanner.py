@@ -195,4 +195,5 @@ def get_top_candidates(limit=5):
             continue
 
     sorted_results = sorted(results, key=lambda x: x[1], reverse=True)
+    print("✅ Candidates found:", sorted_results[:limit])
     return sorted_results[:limit]
