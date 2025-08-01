@@ -31,34 +31,33 @@ def send_message(text):
 
 def get_balance():
     balances = bitvavo_request("GET", "/balance")
-    prices = {}
-    try:
-        tickers = bitvavo_request("GET", "/ticker/price")
-        prices = {t["market"].replace("-EUR", ""): float(t["price"]) for t in tickers if t["market"].endswith("EUR")}
-    except:
-        pass
+    total_eur = 0.0
+    lines = []
 
-    total_eur = 0
-    output = []
     for b in balances:
         try:
-            sym = b["symbol"]
+            symbol = b.get("symbol", "")
             available = float(b.get("available", 0))
-            if available > 0.01:
-                if sym == "EUR":
-                    total_eur += available
-                    output.append(f"EUR: {available:.2f}")
-                elif sym in prices:
-                    eur_value = available * prices[sym]
-                    total_eur += eur_value
-                    output.append(f"{sym}: {available:.2f} ≈ €{eur_value:.2f}")
-                else:
-                    output.append(f"{sym}: {available:.2f}")
-        except:
+            if available < 0.01:
+                continue
+
+            # إذا كانت العملة EUR، احفظها كمبلغ إجمالي
+            if symbol == "EUR":
+                total_eur += available
+                lines.append(f"💶 EUR: {available:.2f}€")
+            else:
+                # نحسب قيمة العملة باليورو حسب السعر الحالي
+                price_data = bitvavo_request("GET", f"/ticker/price?market={symbol}-EUR")
+                price = float(price_data.get("price", 0))
+                eur_value = available * price
+                total_eur += eur_value
+                lines.append(f"{symbol}: {available:.4f} ≈ {eur_value:.2f}€")
+
+        except Exception as e:
             continue
 
-    output.append(f"📊 الإجمالي: €{total_eur:.2f}")
-    return "\n".join(output) if output else "لا يوجد رصيد كافٍ."
+    lines.append(f"\n📊 الإجمالي: {total_eur:.2f}€")
+    return "\n".join(lines) if lines else "لا يوجد رصيد كافٍ."
 
 def buy(symbol):
     path = "/order"
@@ -144,8 +143,8 @@ def handle_telegram_command(text):
     print("📩 أمر تلقاه:", text)
     text = text.strip().lower()
     if "رصيد" in text:
-        msg = get_balance()
-        send_message(f"💰 الرصيد:\n{msg}")
+         msg = get_balance()
+         send_message(f"💰 الرصيد:\n{msg}")
     elif text == "reset":
         r.delete(IS_TRADING_KEY)
         r.delete(LAST_TRADE_KEY)
