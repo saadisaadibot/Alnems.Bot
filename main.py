@@ -6,7 +6,7 @@ import threading
 import requests
 from utils import bitvavo_request
 from market_scanner import pick_best_symbol
-from memory import save_trade
+from memory import save_trade, get_top_confident
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -18,6 +18,7 @@ BUY_AMOUNT_EUR = float(os.getenv("BUY_AMOUNT_EUR", 10))
 
 IS_TRADING_KEY = "nems:is_in_trade"
 LAST_TRADE_KEY = "nems:last_trade"
+TRADE_KEY = "nems:trades"
 
 def send_message(text):
     print(">>", text)
@@ -62,7 +63,7 @@ def buy(symbol):
         "side": "buy",
         "orderType": "market",
         "amountQuote": f"{BUY_AMOUNT_EUR:.2f}",
-        "operatorId": ""  # ← حل مشكلة parameter is required
+        "operatorId": ""
     }
     res = bitvavo_request("POST", path, body)
 
@@ -88,7 +89,6 @@ def buy(symbol):
 
     return None, None
 
-
 def sell(symbol, amount, entry):
     path = "/order"
     body = {
@@ -96,11 +96,10 @@ def sell(symbol, amount, entry):
         "side": "sell",
         "orderType": "market",
         "amount": str(amount),
-        "operatorId": ""  # ← مبدئياً فارغ لتفادي الخطأ الإجباري
+        "operatorId": ""
     }
     res = bitvavo_request("POST", path, body)
 
-    # ✅ تحقق من نجاح الصفقة بناءً على status
     if isinstance(res, dict) and res.get("status") == "filled":
         try:
             fills = res.get("fills", [])
@@ -150,6 +149,34 @@ def trader_loop():
             monitor_trade()
         time.sleep(2)
 
+def get_summary():
+    trades = [json.loads(x) for x in r.lrange(TRADE_KEY, 0, -1)]
+    if not trades:
+        return "📊 لا يوجد صفقات مسجلة بعد."
+
+    total = len(trades)
+    wins = sum(1 for t in trades if t["result"] == "win")
+    losses = total - wins
+    avg = sum(t["percent"] for t in trades) / total
+    profit = sum(t["percent"] for t in trades)
+
+    last_trades = "\n".join([f"{t['symbol']} | {t['result']} | {t['percent']}%" for t in trades[:3]])
+    top_coins = get_top_confident()
+    top_str = "\n".join([f"{s[0]}: {s[1]}" for s in top_coins])
+
+    return f"""📈 ملخص التداول:
+عدد الصفقات: {total}
+✅ رابحة: {wins} | ❌ خاسرة: {losses}
+💹 الربح التراكمي: {profit:.2f}%
+📊 متوسط الصفقة: {avg:.2f}%
+
+🏅 العملات الأعلى ثقة:
+{top_str}
+
+🕵️ آخر 3 صفقات:
+{last_trades}
+"""
+
 def handle_telegram_command(text):
     print("📩 أمر تلقاه:", text)
     text = text.strip().lower()
@@ -168,6 +195,8 @@ def handle_telegram_command(text):
             send_message(f"🔄 داخل صفقة {trade['symbol']} بسعر {trade['entry']}")
         else:
             send_message("🤖 البوت حالياً لا يملك أي صفقة.")
+    elif "الملخص" in text:
+        send_message(get_summary())
 
 def telegram_polling():
     offset = None
