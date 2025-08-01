@@ -49,8 +49,6 @@ def get_top_markets(limit=40):
         sorted_markets = sorted(volumes, key=lambda x: x[1], reverse=True)
         print("📊 Top 40 by volume:", [f"{m[0]}: {round(m[1], 2)}" for m in sorted_markets[:40]])
         return [m[0] for m in sorted_markets[:limit]]
-    except:
-        return []
 
 # 🧠 تحليل المؤشرات للشموع
 def analyze_trend(candles):
