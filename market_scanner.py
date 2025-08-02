@@ -81,7 +81,6 @@ def pick_best_symbol():
     global last_fetch, cached_top
     now = time.time()
 
-    # كل 10 دقائق يحدث قائمة العملات النشطة
     if now - last_fetch > 300:
         print("📊 تحديث قائمة العملات...")
         cached_top = get_top_markets()
@@ -89,6 +88,7 @@ def pick_best_symbol():
 
     frozen = set(k.decode().split(FREEZE_PREFIX)[-1] for k in r.scan_iter(f"{FREEZE_PREFIX}*"))
     params = load_params()
+    candidates = []
 
     for symbol in cached_top:
         if symbol in frozen:
@@ -96,7 +96,7 @@ def pick_best_symbol():
 
         try:
             candles = get_candles(symbol, interval="1m", limit=60)
-            if len(candles) < 30:
+            if len(candles) < 40:
                 continue
 
             trend = analyze_trend(candles)
@@ -129,19 +129,27 @@ def pick_best_symbol():
             else:
                 debug.append(f"❌ Vol={trend['volatility']}%")
 
-            if trend["volume_spike"]:
-                score += 1
-                debug.append(f"✅ Volume Spike")
+            # 🔍 Volume Spike - دقيق: 3 شموع أخيرة مقابل 30 سابقة
+            volumes = [float(c[5]) for c in candles]
+            recent = sum(volumes[-3:]) / 3
+            past = sum(volumes[-33:-3]) / 30 if len(volumes) >= 36 else 0
+            if recent > past * 2:
+                score += 2  # ✅ نعطيه نقطتين لأنه أقوى مؤشر
+                debug.append("✅ Volume Spike (3min vs 30min)")
             else:
-                debug.append(f"❌ Volume Spike")
+                debug.append("❌ Volume Spike")
 
-            if score >= params["min_score"] and confidence >= 1.0:
-                reason = f"🔥 {symbol} | نقاط={score} | " + " | ".join(debug)
-                return symbol, reason, trend
+            if score >= 4 and confidence >= 1.0:
+                candidates.append((symbol, score, debug, trend))
 
         except Exception as e:
             print(f"⚠️ خطأ في {symbol}: {e}")
             continue
+
+    if candidates:
+        best = max(candidates, key=lambda x: x[1])  # اختار الأعلى نقاط
+        reason = f"🔥 {best[0]} | نقاط={best[1]} | " + " | ".join(best[2])
+        return best[0], reason, best[3]
 
     return None, None, None
 # 📋 عرض أقوى العملات حتى لو لم تصل للحد الأدنى للنقاط
