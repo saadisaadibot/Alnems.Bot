@@ -140,19 +140,21 @@ def monitor_trades():
             trail_percent = trade.get("trail_percent", 0.5)
             max_profit = trade.get("max_profit", 0)
 
-            # السعر الحالي
             ticker = bitvavo_request("GET", f"/ticker/price?market={symbol}")
             price = float(ticker.get("price", 0))
             profit = (price - entry) / entry * 100
 
-            # تحديث أعلى ربح تحقق
+            # ✅ تحديث الذروة
             if profit > max_profit:
                 trade["max_profit"] = round(profit, 4)
                 r.hset(ACTIVE_TRADES_KEY, symbol, json.dumps(trade))
-                continue  # لا تبيع الآن، لأن السعر في ذروة جديدة
+                continue
 
-            # تحقق إذا هبط من الذروة بأكثر من trail_percent
-            if max_profit > 0 and profit <= max_profit - trail_percent:
+            # ✅ شرط التريلينغ
+            if max_profit >= 2 and profit <= max_profit - trail_percent:
+                sell(symbol, amount, entry)
+            # ✅ شرط ستوب لوس
+            elif profit <= -2:
                 sell(symbol, amount, entry)
 
         except Exception as e:
