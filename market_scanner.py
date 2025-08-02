@@ -27,36 +27,6 @@ def load_params():
             r.hset(PARAMS_KEY, k, v)
     return {k: float(saved.get(k.encode(), v)) for k, v in default.items()}
 
-# 📊 تحديث توب 40 بناءً على حجم التداول آخر 30 دقيقة
-def get_top_markets(limit=40):
-    print("🚀 دخل فعليًا إلى get_top_markets()")
-    try:
-        res = requests.get("https://api.bitvavo.com/v2/markets")
-        print("📩 رد Bitvavo:", res.status_code)
-        all_markets = [m["market"] for m in res.json()]
-        volumes = []
-
-        for m in all_markets:
-            try:
-                candles = get_candles(m, interval="1m", limit=30)
-                if len(candles) < 10:
-                    continue
-                volume = sum(float(c[5]) for c in candles)
-                volumes.append((m, volume))
-            except Exception as e:
-                print(f"❌ خطأ أثناء جلب الشموع لـ {m}:", str(e))
-                continue
-
-        sorted_markets = sorted(volumes, key=lambda x: x[1], reverse=True)
-        print("📊 Top 40 by volume:")
-        for m, vol in sorted_markets[:limit]:
-            print(f" - {m}: {vol:.0f}")
-        return [m[0] for m in sorted_markets[:limit]]
-
-    except Exception as e:
-        print("❌ خطأ أثناء جلب الأسواق:", str(e))
-        return []
-
 # 🧠 تحليل المؤشرات للشموع
 def analyze_trend(candles):
     closes = [float(c[4]) for c in candles]
@@ -76,14 +46,73 @@ def analyze_trend(candles):
         "volume_spike": volumes[-1] > (sum(volumes[:-5]) / len(volumes[:-5])) * 2
     }
 
+# 🔀 دمج عملات من مصادر مختلفة
+def collect_mixed_top_markets():
+    print("🔍 بدء تجميع العملات من مصادر متنوعة...")
+    try:
+        res = requests.get("https://api.bitvavo.com/v2/markets")
+        all_markets = [m["market"] for m in res.json() if "-EUR" in m["market"]]
+
+        top_30min = []
+        top_24h = []
+        top_7d = []
+        explosive = []
+
+        for symbol in all_markets:
+            try:
+                base = symbol.replace("-EUR", "")
+
+                # 🔸 آخر 30 دقيقة
+                candles_30m = get_candles(symbol, interval="1m", limit=30)
+                volume_30m = sum(float(c[5]) for c in candles_30m)
+                top_30min.append((symbol, volume_30m))
+
+                # 🔸 آخر 24 ساعة (15m * 96)
+                candles_1d = get_candles(symbol, interval="15m", limit=96)
+                volume_1d = sum(float(c[5]) for c in candles_1d)
+                top_24h.append((symbol, volume_1d))
+
+                # 🔸 آخر 7 أيام (1d)
+                candles_7d = get_candles(symbol, interval="1d", limit=7)
+                if len(candles_7d) >= 2:
+                    start = float(candles_7d[0][4])
+                    end = float(candles_7d[-1][4])
+                    change = ((end - start) / start) * 100
+                    top_7d.append((symbol, change))
+
+                # 🔸 هل حصل انفجار بيومي؟ (أكثر من 10%)
+                for c in candles_7d:
+                    open_ = float(c[1])
+                    close = float(c[4])
+                    if (close - open_) / open_ * 100 >= 10:
+                        explosive.append(symbol)
+                        break
+
+            except Exception as e:
+                continue
+
+        top_30min = sorted(top_30min, key=lambda x: x[1], reverse=True)[:10]
+        top_24h = sorted(top_24h, key=lambda x: x[1], reverse=True)[:10]
+        top_7d = sorted(top_7d, key=lambda x: x[1], reverse=True)[:10]
+
+        combined = list(dict.fromkeys(
+            [x[0] for x in top_30min + top_24h + top_7d] + explosive
+        ))
+
+        print(f"✅ تم تجميع {len(combined)} عملة.")
+        return combined[:40]
+
+    except Exception as e:
+        print(f"❌ خطأ في جمع العملات: {e}")
+        return []
+
 # 🧠 اختيار العملة بناءً على نظام النقاط الذكي
 def pick_best_symbol():
     global last_fetch, cached_top
     now = time.time()
 
     if now - last_fetch > 300:
-        print("📊 تحديث قائمة العملات...")
-        cached_top = get_top_markets()
+        cached_top = collect_mixed_top_markets()
         last_fetch = now
 
     frozen = set(k.decode().split(FREEZE_PREFIX)[-1] for k in r.scan_iter(f"{FREEZE_PREFIX}*"))
@@ -130,7 +159,7 @@ def pick_best_symbol():
             else:
                 debug.append(f"❌ Vol={trend['volatility']}%")
 
-            # Volume Spike: 3 شموع مقابل 30 سابقة
+            # Volume Spike
             volumes = [float(c[5]) for c in candles]
             recent = sum(volumes[-3:]) / 3
             past = sum(volumes[-33:-3]) / 30 if len(volumes) >= 36 else 0
@@ -141,7 +170,6 @@ def pick_best_symbol():
             else:
                 debug.append("❌ Volume Spike")
 
-            # استثناء العملات ذات ثقة منخفضة جدًا
             if confidence < 0.5:
                 notes.append("⚠️ ثقة منخفضة")
                 continue
@@ -154,20 +182,21 @@ def pick_best_symbol():
             continue
 
     if candidates:
-        best = max(candidates, key=lambda x: (x[1], x[5]))  # نقاط ثم ثقة
+        best = max(candidates, key=lambda x: (x[1], x[5]))
         reason = f"🔥 {best[0]} | نقاط={best[1]} | " + " | ".join(best[2])
         if best[4]:
             reason += " | " + " ".join(best[4])
         return best[0], reason, best[3]
 
     return None, None, None
+
 # 📋 عرض أقوى العملات حتى لو لم تصل للحد الأدنى للنقاط
 def get_top_candidates(limit=5):
     global last_fetch, cached_top
     now = time.time()
 
     if now - last_fetch > 600:
-        cached_top = get_top_markets()
+        cached_top = collect_mixed_top_markets()
         last_fetch = now
 
     frozen = set(k.decode().split(FREEZE_PREFIX)[-1] for k in r.scan_iter(f"{FREEZE_PREFIX}*"))
