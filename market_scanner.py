@@ -104,6 +104,7 @@ def pick_best_symbol():
 
             score = 0
             debug = []
+            notes = []
 
             if trend["position"] < params["pos_max"]:
                 score += 1
@@ -129,26 +130,34 @@ def pick_best_symbol():
             else:
                 debug.append(f"❌ Vol={trend['volatility']}%")
 
-            # 🔍 Volume Spike - دقيق: 3 شموع أخيرة مقابل 30 سابقة
+            # Volume Spike: 3 شموع مقابل 30 سابقة
             volumes = [float(c[5]) for c in candles]
             recent = sum(volumes[-3:]) / 3
             past = sum(volumes[-33:-3]) / 30 if len(volumes) >= 36 else 0
-            if recent > past * 2:
-                score += 2  # ✅ نعطيه نقطتين لأنه أقوى مؤشر
-                debug.append("✅ Volume Spike (3min vs 30min)")
+            if past > 0 and recent > past * 2:
+                score += 2
+                debug.append("✅ Volume Spike (3m>30m)")
+                notes.append("🔼 نشاط مفاجئ")
             else:
                 debug.append("❌ Volume Spike")
 
-            if score >= 4 and confidence >= 1.0:
-                candidates.append((symbol, score, debug, trend))
+            # استثناء العملات ذات ثقة منخفضة جدًا
+            if confidence < 0.5:
+                notes.append("⚠️ ثقة منخفضة")
+                continue
+
+            if score >= 4:
+                candidates.append((symbol, score, debug, trend, notes, confidence))
 
         except Exception as e:
             print(f"⚠️ خطأ في {symbol}: {e}")
             continue
 
     if candidates:
-        best = max(candidates, key=lambda x: x[1])  # اختار الأعلى نقاط
+        best = max(candidates, key=lambda x: (x[1], x[5]))  # نقاط ثم ثقة
         reason = f"🔥 {best[0]} | نقاط={best[1]} | " + " | ".join(best[2])
+        if best[4]:
+            reason += " | " + " ".join(best[4])
         return best[0], reason, best[3]
 
     return None, None, None
