@@ -72,22 +72,14 @@ def buy(symbol):
     if isinstance(res, dict) and res.get("status") == "filled":
         try:
             fills = res.get("fills", [])
-            if not fills or "price" not in fills[0]:
-                send_message(f"❌ فشل الحصول على السعر بعد الشراء: {symbol}")
-                # نجمد العملة حتى ما يرجع يشتريها فوراً
-                r.set(f"nems:freeze:{symbol}", "1", ex=900)
+            if not fills or "price" not in fills[0] or float(fills[0]["price"]) == 0:
+                send_message(f"❌ فشل الشراء أو السعر صفر لـ {symbol} - سيتم تجميدها مؤقتًا")
+                r.set(f"nems:freeze:{symbol}", "1", ex=1800)  # تجميد 30 دقيقة
                 return None, None
 
             price = float(fills[0]["price"])
             amount = float(fills[0]["amount"])
 
-            if price == 0:
-                send_message(f"❌ السعر يساوي صفر بعد الشراء: {symbol}")
-                # نجمد العملة لحمايتنا من التكرار
-                r.set(f"nems:freeze:{symbol}", "1", ex=900)
-                return None, None
-
-            # سجل الصفقة
             r.hset(ACTIVE_TRADES_KEY, symbol, json.dumps({
                 "symbol": symbol,
                 "entry": price,
@@ -96,19 +88,17 @@ def buy(symbol):
                 "trail_percent": 0.5,
                 "max_profit": 0
             }))
-
             send_message(f"✅ شراء {symbol} بسعر {price:.4f}")
             return price, amount
 
         except Exception as e:
             send_message(f"⚠️ تم الشراء لكن فشل تحليل الرد: {e}")
-            r.set(f"nems:freeze:{symbol}", "1", ex=900)
             return None, None
 
     else:
         reason = res.get("error") or json.dumps(res, ensure_ascii=False)
         send_message(f"❌ فشل شراء {symbol}: {reason}")
-        r.set(f"nems:freeze:{symbol}", "1", ex=300)
+        r.set(f"nems:freeze:{symbol}", "1", ex=600)
         return None, None
 
 def sell(symbol, amount, entry):
