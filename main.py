@@ -88,7 +88,7 @@ def buy(symbol):
                 "trail_percent": 0.5,
                 "max_profit": 0
             }))
-            send_message(f"✅ شراء {symbol} بسعر {price:.10f}")
+            send_message(f"✅ شراء {symbol} بسعر {price:.12f}")
             return price, amount
 
         except Exception as e:
