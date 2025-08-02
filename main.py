@@ -248,6 +248,10 @@ def handle_telegram_command(text):
                 f"{json.loads(v)['symbol']} بسعر {json.loads(v)['entry']}" for v in active.values()
             ])
             send_message(f"🔄 الصفقات النشطة:\n{status}")
+    elif text.startswith("انسى "):
+        symbol = text.split(" ", 1)[-1].strip().upper()
+        r.hdel("nems:active_trades", symbol)
+        send_message(f"🧹 تم حذف الصفقة المفتوحة لـ {symbol}")
     elif "شو شايف" in text or "أقوى عملات" in text:
         from market_scanner import get_top_candidates
         top = get_top_candidates()
