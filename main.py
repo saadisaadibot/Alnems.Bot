@@ -164,14 +164,51 @@ def trader_loop():
     while True:
         active = r.hgetall(ACTIVE_TRADES_KEY)
         if len(active) < 2:
-            symbol, reason, _ = pick_best_symbol()
+            symbol, reason, trend = pick_best_symbol()
             if symbol and symbol.encode() not in active:
                 send_message(f"🚨 إشارة شراء: {reason}")
                 buy(symbol)
             else:
                 print("🔍 لا فرص أو العملة مكررة...")
         else:
-            monitor_trades()
+            # ✅ مقارنة القوة بين العملات النشطة والجديدة
+            symbol, reason, trend = pick_best_symbol()
+            if not symbol:
+                monitor_trades()
+                time.sleep(2)
+                continue
+
+            new_score = sum([
+                trend["position"] < 25,
+                trend["slope"] > -1,
+                trend["wave"] > 4,
+                trend["volatility"] > 1.5
+            ])
+
+            worst_symbol = None
+            worst_score = 99
+            for sym_b, trade_json in active.items():
+                sym = sym_b.decode()
+                from utils import get_candles, analyze_trend
+                candles = get_candles(sym, interval="1m", limit=60)
+                trend_old = analyze_trend(candles)
+                old_score = sum([
+                    trend_old["position"] < 25,
+                    trend_old["slope"] > -1,
+                    trend_old["wave"] > 4,
+                    trend_old["volatility"] > 1.5
+                ])
+                if old_score < worst_score:
+                    worst_symbol = sym
+                    worst_score = old_score
+
+            if worst_symbol and new_score >= worst_score + 2:
+                send_message(f"🔁 استبدال {worst_symbol} بفرصة أقوى: {symbol}")
+                old_trade = json.loads(active[worst_symbol.encode()])
+                sell(worst_symbol, old_trade["amount"], old_trade["entry"])
+                buy(symbol)
+
+        monitor_trades()
         time.sleep(2)
 
 def get_summary():
